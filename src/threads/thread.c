@@ -212,7 +212,7 @@ thread_create (const char *name, int priority,
   /* created thread have highest priority */
   struct thread *curr = thread_current ();
 
-  if (priority < curr->priority) {
+  if (priority > curr->priority) {
     thread_yield();
   }
 
@@ -335,6 +335,15 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+
+  struct thread* t;
+
+  if (!list_empty (&ready_list)){
+    t = list_entry(list_front(&ready_list), struct thread, elem);
+    if (t->priority > new_priority){
+      thread_yield();
+    }
+  }
 }
 
 /* Returns the current thread's priority. */
@@ -575,5 +584,3 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
-
-//test git
