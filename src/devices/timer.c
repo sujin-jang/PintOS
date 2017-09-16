@@ -99,7 +99,7 @@ timer_elapsed (int64_t then)
 struct timer_elem
 {
   struct list_elem elem;     /* List element. */
-  struct thread thread;      /* This thread */
+  struct thread* thread;      /* This thread */
   int64_t tick;               /* ticktick */
 };
 
@@ -119,24 +119,23 @@ value_less (const struct list_elem *a_, const struct list_elem *b_,
 void
 timer_sleep (int64_t ticks) 
 {
-  // ASSERT (intr_get_level () == INTR_ON);
-
-  //enum intr_level old_level;
-  //old_level = intr_disable ();
 
   int64_t start = timer_ticks ();
-
   struct thread *t = thread_current();
-  struct timer_elem time_waiter;
-  time_waiter.thread = *t;
-  time_waiter.tick = start + ticks;
 
-  thread_block();
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
+  struct timer_elem time_waiter;
+  time_waiter.thread = t;
+  time_waiter.tick = start + ticks;
 
   list_insert_ordered(&timer_list, &time_waiter.elem,
         value_less, NULL);
 
-  //intr_set_level (old_level);
+  thread_block();
+
+  intr_set_level (old_level);
 
   /*
   ASSERT (intr_get_level () == INTR_ON);
@@ -178,6 +177,8 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
 
+  ticks++;
+
   struct list_elem* front_elem;
   struct timer_elem* timer_waiter;
 
@@ -193,9 +194,7 @@ timer_interrupt (struct intr_frame *args UNUSED)
     } else {
       front_elem = list_pop_front(&timer_list);
 
-      printf("%d\n", timer_waiter->thread.status);
-
-      thread_unblock(&timer_waiter->thread);
+      thread_unblock(timer_waiter->thread);
 
     }
   }
@@ -207,7 +206,7 @@ timer_interrupt (struct intr_frame *args UNUSED)
   // struct thread* t = list_pop_front()
   // thread_unblock(t)
 
-  ticks++;
+  
   thread_tick ();
 }
 
