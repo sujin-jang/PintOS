@@ -23,13 +23,31 @@ static int64_t ticks;
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
-static struct list timer_list;
 
 static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 
+/* List of sleeping threads */ 
+static struct list timer_list;
+
+struct timer_elem
+{
+  struct list_elem elem;     /* List element. */
+  struct thread* thread;      /* This thread */
+  int64_t tick;               /* ticktick */
+};
+
+static bool
+timer_less (const struct list_elem *a_, const struct list_elem *b_,
+            void *aux UNUSED)
+{
+  const struct timer_elem *a = list_entry(a_, struct timer_elem, elem);
+  const struct timer_elem *b = list_entry(b_, struct timer_elem, elem);
+
+  return a->tick < b->tick;
+}
 
 /* Sets up the 8254 Programmable Interval Timer (PIT) to
    interrupt PIT_FREQ times per second, and registers the
@@ -95,25 +113,7 @@ timer_elapsed (int64_t then)
   return timer_ticks () - then;
 }
 
-/* One thread in a list. */
-struct timer_elem
-{
-  struct list_elem elem;     /* List element. */
-  struct thread* thread;      /* This thread */
-  int64_t tick;               /* ticktick */
-};
-
 /* Returns true if expire A  */
-
-static bool
-value_less (const struct list_elem *a_, const struct list_elem *b_,
-            void *aux UNUSED)
-{
-  const struct timer_elem *a = list_entry(a_, struct timer_elem, elem);
-  const struct timer_elem *b = list_entry(b_, struct timer_elem, elem);
-
-  return a->tick < b->tick;
-}
 
 /* Suspends execution for approximately TICKS timer ticks. */
 void
@@ -130,18 +130,13 @@ timer_sleep (int64_t ticks)
   time_waiter.thread = t;
   time_waiter.tick = start + ticks;
 
+  /* insert in order of time to wake up */
   list_insert_ordered(&timer_list, &time_waiter.elem,
-        value_less, NULL);
+        timer_less, NULL);
 
   thread_block();
 
   intr_set_level (old_level);
-
-  /*
-  ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
-  */
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -190,23 +185,13 @@ timer_interrupt (struct intr_frame *args UNUSED)
     timer_waiter = list_entry(front_elem, struct timer_elem, elem);
 
     if (timer_waiter->tick > current_tick) {
-      break;
+      break; /* no thread to wake up */
     } else {
+      /* wake up the thread: pop from timer list and unblock */
       front_elem = list_pop_front(&timer_list);
-
       thread_unblock(timer_waiter->thread);
-
     }
   }
-
-  // have to insure the thread list is not empty.. see list_pop_front
-  // pop the front thread and unblock it.
-  // if (thread_elem == NULL)
-  //  ...
-  // struct thread* t = list_pop_front()
-  // thread_unblock(t)
-
-  
   thread_tick ();
 }
 
