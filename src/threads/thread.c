@@ -71,7 +71,7 @@ static void schedule (void);
 void schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
-static bool
+bool
 priority_greater (const struct list_elem *a_, const struct list_elem *b_,
             void *aux UNUSED)
 {
@@ -79,6 +79,19 @@ priority_greater (const struct list_elem *a_, const struct list_elem *b_,
   const struct thread *b = list_entry(b_, struct thread, elem);
 
   return a->priority > b->priority;
+}
+
+void thread_donation (struct thread* thread, int priority) {
+
+  //printf("donation\n");
+
+  if (thread->priority < priority) {
+    thread->priority = priority;
+
+    ASSERT(thread->status == THREAD_READY);
+    list_remove (&thread->elem);
+    list_insert_ordered (&ready_list, &thread->elem, priority_greater, NULL);
+  }
 }
 
 /* Initializes the threading system by transforming the code
@@ -210,6 +223,7 @@ thread_create (const char *name, int priority,
   thread_unblock (t);
 
   /* created thread have highest priority */
+
   struct thread *curr = thread_current ();
 
   if (priority > curr->priority) {
@@ -256,7 +270,18 @@ thread_unblock (struct thread *t)
   list_insert_ordered (&ready_list, &t->elem, priority_greater, NULL);
   //list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
+
   intr_set_level (old_level);
+  
+  /*
+  struct thread *curr = running_thread ();
+  if (curr != idle_thread){
+    if (t->priority > curr->priority) {
+      thread_yield();
+    }
+  }
+  */
+  
 }
 
 /* Returns the name of the running thread. */
@@ -335,12 +360,14 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  thread_current ()->priority_original = new_priority;
 
   struct thread* t;
 
   if (!list_empty (&ready_list)){
     t = list_entry(list_front(&ready_list), struct thread, elem);
     if (t->priority > new_priority){
+      //ASSERT(0);
       thread_yield();
     }
   }
@@ -468,6 +495,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->priority_original = priority;
   t->magic = THREAD_MAGIC;
 }
 
