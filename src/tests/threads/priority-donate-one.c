@@ -54,7 +54,7 @@ acquire1_thread_func (void *lock_)
 }
 
 static void
-acquire2_thread_func (void *lock_) 
+acquire2_thread_func (void *lock_)
 {
   struct lock *lock = lock_;
 
