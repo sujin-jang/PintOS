@@ -88,7 +88,9 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-    int priority_original;
+    int priority_original;              /* Original Priority. */
+
+    struct list lock_list;
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -110,6 +112,8 @@ extern bool thread_mlfqs;
 bool
 priority_greater (const struct list_elem *a_, const struct list_elem *b_,
             void *aux UNUSED);
+
+void thread_sort_ready_list (void);
 
 void thread_init (void);
 void thread_start (void);
@@ -137,7 +141,5 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
-
-void thread_donation (struct thread* thread, int priority);
 
 #endif /* threads/thread.h */

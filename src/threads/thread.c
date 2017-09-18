@@ -81,16 +81,18 @@ priority_greater (const struct list_elem *a_, const struct list_elem *b_,
   return a->priority > b->priority;
 }
 
-void thread_donation (struct thread* thread, int priority) {
+void thread_sort_ready_list (void) {
 
-  //printf("donation\n");
+  struct thread *curr = thread_current ();
+  struct thread *t;
+  
+  if (!list_empty (&ready_list)){
 
-  if (thread->priority < priority) {
-    thread->priority = priority;
-
-    ASSERT(thread->status == THREAD_READY);
-    list_remove (&thread->elem);
-    list_insert_ordered (&ready_list, &thread->elem, priority_greater, NULL);
+    list_sort (&ready_list, priority_greater, NULL);
+    t = list_entry(list_front(&ready_list), struct thread, elem);
+    if (t->priority > curr->priority){
+      thread_yield();
+    }
   }
 }
 
@@ -223,7 +225,6 @@ thread_create (const char *name, int priority,
   thread_unblock (t);
 
   /* created thread have highest priority */
-
   struct thread *curr = thread_current ();
 
   if (priority > curr->priority) {
@@ -270,18 +271,7 @@ thread_unblock (struct thread *t)
   list_insert_ordered (&ready_list, &t->elem, priority_greater, NULL);
   //list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
-
   intr_set_level (old_level);
-  
-  /*
-  struct thread *curr = running_thread ();
-  if (curr != idle_thread){
-    if (t->priority > curr->priority) {
-      thread_yield();
-    }
-  }
-  */
-  
 }
 
 /* Returns the name of the running thread. */
@@ -360,14 +350,12 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
-  thread_current ()->priority_original = new_priority;
 
   struct thread* t;
 
   if (!list_empty (&ready_list)){
     t = list_entry(list_front(&ready_list), struct thread, elem);
     if (t->priority > new_priority){
-      //ASSERT(0);
       thread_yield();
     }
   }
@@ -496,6 +484,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->priority_original = priority;
+  list_init (&t->lock_list);
   t->magic = THREAD_MAGIC;
 }
 
