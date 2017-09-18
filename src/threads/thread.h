@@ -92,6 +92,8 @@ struct thread
 
     struct list lock_list;
     struct thread *holder_thread;
+
+    struct lock* waiting_lock;
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 

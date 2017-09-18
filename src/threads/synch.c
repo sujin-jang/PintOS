@@ -221,12 +221,16 @@ lock_acquire (struct lock *lock)
   if(lock->holder != NULL)
     lock_donation(curr, lock);
 
+  curr->waiting_lock = lock;
+
   while( t->holder_thread !=NULL) {
     nest_donation(t, t->holder_thread);
     t = t->holder_thread;
-  }
+  }  
 
   sema_down (&lock->semaphore);
+
+  curr->waiting_lock = NULL;
 
   list_push_back (&curr->lock_list, &lock->elem);
   lock->holder = curr;
@@ -255,7 +259,10 @@ lock_donation(struct thread* thread, struct lock* lock)
 static void
 nest_donation(struct thread* thread, struct thread *holder){
   if(holder->priority < thread->priority){
+
     holder->priority = thread->priority;
+    thread->waiting_lock->priority = thread->priority;
+
     thread_sort_ready_list();
   }
 }
