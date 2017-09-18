@@ -32,6 +32,11 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+static void nest_donation(struct thread* thread, struct thread *holder);
+static void lock_donation (struct thread* thread, struct lock* lock);
+static void lock_release_reset_priority (struct thread* thread);
+static void lock_release_reset_holder(struct lock* lock);
+
 static bool cond_priority_greater (const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED);
 
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
@@ -211,20 +216,32 @@ lock_acquire (struct lock *lock)
   ASSERT (!lock_held_by_current_thread (lock));
 
   struct thread *curr = thread_current ();
+  curr->holder_thread = lock->holder;
+  struct thread *t = curr;
+  if(lock->holder != NULL)
+    lock_donation(curr, lock);
 
-  if (lock->holder != NULL) {
-    lock_donation (curr, lock);
+  while( t->holder_thread !=NULL) {
+    nest_donation(t, t->holder_thread);
+    t = t->holder_thread;
   }
 
   sema_down (&lock->semaphore);
 
   list_push_back (&curr->lock_list, &lock->elem);
-  lock->holder = thread_current ();
-
+  lock->holder = curr;
+  curr->holder_thread = NULL;
+  struct semaphore *sema = &lock->semaphore;
+  struct list *w = &sema->waiters;
+  struct list_elem *e;
+  for (e = list_begin (w); e != list_end (w); e = list_next (e)){
+    struct thread* t = list_entry (e, struct thread, elem);
+    t->holder_thread = curr;
+  }
 }
 
-void
-lock_donation (struct thread* thread, struct lock* lock)
+static void
+lock_donation(struct thread* thread, struct lock* lock)
 {
   if(lock->priority < thread->priority)
   {
@@ -232,6 +249,14 @@ lock_donation (struct thread* thread, struct lock* lock)
     lock->holder->priority = thread->priority;
 
     thread_sort_ready_list ();
+  }
+}
+
+static void
+nest_donation(struct thread* thread, struct thread *holder){
+  if(holder->priority < thread->priority){
+    holder->priority = thread->priority;
+    thread_sort_ready_list();
   }
 }
 
@@ -274,9 +299,12 @@ lock_release (struct lock *lock)
 
   struct thread *curr = thread_current ();
   lock_release_reset_priority (curr);
+  //---------------------------------
+  lock_release_reset_holder(lock);
+  //---------------------------------
 }
 
-void
+static void
 lock_release_reset_priority (struct thread* thread)
 {
   int effective_priority = thread -> priority_original;
@@ -295,6 +323,17 @@ lock_release_reset_priority (struct thread* thread)
   thread_sort_ready_list ();
 }
 
+static void
+lock_release_reset_holder (struct lock* lock)
+{
+  struct semaphore *sema = &lock->semaphore;
+  struct list *w = &sema->waiters;
+  struct list_elem *e;
+  for (e = list_begin (w); e != list_end (w); e = list_next (e)){
+    struct thread* t = list_entry (e, struct thread, elem);
+    t->holder_thread = NULL;
+  }
+}
 /* Returns true if the current thread holds LOCK, false
    otherwise.  (Note that testing whether some other thread holds
    a lock would be racy.) */

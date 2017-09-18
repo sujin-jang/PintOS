@@ -91,7 +91,7 @@ struct thread
     int priority_original;              /* Original Priority. */
 
     struct list lock_list;
-
+    struct thread *holder_thread;
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 

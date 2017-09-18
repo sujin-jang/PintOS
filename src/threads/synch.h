@@ -33,8 +33,6 @@ bool lock_try_acquire (struct lock *);
 void lock_release (struct lock *);
 bool lock_held_by_current_thread (const struct lock *);
 
-void lock_donation (struct thread* thread, struct lock* lock);
-void lock_release_reset_priority (struct thread* thread);
 
 /* Condition variable. */
 struct condition 
@@ -55,3 +53,4 @@ void cond_broadcast (struct condition *, struct lock *);
 #define barrier() asm volatile ("" : : : "memory")
 
 #endif /* threads/synch.h */
+
