@@ -71,6 +71,9 @@ static void schedule (void);
 void schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+/* Returns true if priority of thread A is greater than B,
+   false otherwise. */
+
 bool
 priority_greater (const struct list_elem *a_, const struct list_elem *b_,
             void *aux UNUSED)
@@ -83,16 +86,9 @@ priority_greater (const struct list_elem *a_, const struct list_elem *b_,
 
 void thread_sort_ready_list (void) {
 
-  struct thread *curr = thread_current ();
-  struct thread *t;
-  
   if (!list_empty (&ready_list)){
-
     list_sort (&ready_list, priority_greater, NULL);
-    t = list_entry(list_front(&ready_list), struct thread, elem);
-    if (t->priority > curr->priority){
-      thread_yield();
-    }
+    thread_yield();
   }
 }
 
@@ -225,9 +221,7 @@ thread_create (const char *name, int priority,
   thread_unblock (t);
 
   /* created thread have highest priority */
-  struct thread *curr = thread_current ();
-
-  if (priority > curr->priority) {
+  if (priority > thread_current ()->priority) {
     thread_yield();
   }
 
@@ -269,7 +263,6 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   
   list_insert_ordered (&ready_list, &t->elem, priority_greater, NULL);
-  //list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -339,7 +332,6 @@ thread_yield (void)
   old_level = intr_disable ();
   if (curr != idle_thread)
     list_insert_ordered (&ready_list, &curr->elem, priority_greater, NULL); 
-    //list_push_back (&ready_list, &curr->elem);
   curr->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -351,9 +343,11 @@ thread_set_priority (int new_priority)
 {
   struct thread *curr = thread_current ();
   struct thread* t;
+
+  /* if current thread receive donation, set only original priority.
+     Otherwise, set both original and effective priority. */
   
   if(curr->priority_original == curr->priority) {
-    /* if current thread didn't receive donation */
     curr->priority = new_priority;
   }
 
@@ -492,6 +486,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority_original = priority;
   list_init (&t->lock_list);
   t->magic = THREAD_MAGIC;
+  t->lock_wait = NULL;
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
