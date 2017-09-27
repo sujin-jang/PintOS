@@ -30,16 +30,15 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
-
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
-
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -53,16 +52,65 @@ start_process (void *f_name)
   char *file_name = f_name;
   struct intr_frame if_;
   bool success;
-
+  /* --------------------------------------------------------------------- */
+  int size = strlen(file_name) + 1;
+  int used_size = size + (size % 4) + sizeof(char *); // Just for checking
+  int argc=0; // It counts number of parsed argument
+  char **argv; // It holds parsed argument
+  argv = palloc_get_page (0);
+  if (argv == NULL)
+    return TID_ERROR;
+  char *token, *save_ptr;
+  for (token = strtok_r (file_name, " ", &save_ptr);
+      token != NULL; token = strtok_r (NULL, " ",&save_ptr)){
+    argv[argc] = (char *)PHYS_BASE + (token - file_name) - size ;
+    // Transform address of token to 
+    // address which arguments have to have in stack
+    argc++;
+  }
+  /* --------------------------------------------------------------------- */
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
+  /* --------------------------------------------------------------------- */
+  /* Haney: From here, the value of arguments will be copied on stack      */
+  if_.esp -= sizeof(char) * size;
+  memcpy (if_.esp, file_name, size );
+  if_.esp -= sizeof(char) * (size % 4) + sizeof(char *);
+  // Amount of decrement in esp should include
+  // length of arguments variable (:which named 'file_name') and word-align
+  // and data of argv[argc] which is always 0. (Refer pintos manual 3.5.1)
+  /* Haney: From here, the address of arguments will be copied on stack    */
+  int i;
+  for(i = argc-1; i >= 0; i--){
+    if_.esp -= sizeof(char *);
+    memcpy (if_.esp, argv+i, sizeof(char *));
+    used_size += sizeof(char *);
+  }
 
-  /* If load failed, quit. */
+  /* Haney: From here, argv, argc, return address will be copied on stack  */
+  // argv
+  char **temp_esp = if_.esp;
+  if_.esp -= sizeof(char **);
+  memcpy (if_.esp, &temp_esp, sizeof(char **));
+  used_size += sizeof(char **);
+  // argc
+  if_.esp -= sizeof(int);
+  memcpy (if_.esp, &argc, sizeof(int));
+  used_size += sizeof(int);
+  // return address
+  if_.esp -= sizeof(void(*)());
+    // No need to copy 0 value. Stack already initailized by 0
+  used_size += sizeof(void(*)());
+
+  hex_dump(if_.esp, if_.esp, used_size, true); // Checking code
   palloc_free_page (file_name);
+  palloc_free_page (argv);
+  /* --------------------------------------------------------------------- */
+  /* If load failed, quit. */
   if (!success) 
     thread_exit ();
 
@@ -214,7 +262,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
-
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
@@ -225,7 +272,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   file = filesys_open (file_name);
   if (file == NULL) 
     {
-      printf ("load: %s: open failed\n", file_name);
+      printf ("load : %s: open failed\n", file_name);
       goto done; 
     }
 
@@ -304,7 +351,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
-
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 

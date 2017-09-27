@@ -219,6 +219,8 @@ lock_acquire (struct lock *lock)
     iter_t = holder;
   }  
 
+//TODO: Do we have to sort ready list all the time 
+//while iteration execution?
   sema_down (&lock->semaphore);
 
   lock->holder = curr;
