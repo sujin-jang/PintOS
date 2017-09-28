@@ -30,15 +30,16 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
+
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
+
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -75,6 +76,9 @@ start_process (void *f_name)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
+
+  //printf("here\n");
+
   /* --------------------------------------------------------------------- */
   /* Haney: From here, the value of arguments will be copied on stack      */
   if_.esp -= sizeof(char) * size;
@@ -106,7 +110,7 @@ start_process (void *f_name)
     // No need to copy 0 value. Stack already initailized by 0
   used_size += sizeof(void(*)());
 
-  hex_dump(if_.esp, if_.esp, used_size, true); // Checking code
+  //hex_dump(if_.esp, if_.esp, used_size, true); // Checking code
   palloc_free_page (file_name);
   palloc_free_page (argv);
   /* --------------------------------------------------------------------- */
@@ -124,18 +128,29 @@ start_process (void *f_name)
   NOT_REACHED ();
 }
 
+
 /* Waits for thread TID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
    exception), returns -1.  If TID is invalid or if it was not a
    child of the calling process, or if process_wait() has already
    been successfully called for the given TID, returns -1
    immediately, without waiting.
-
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+
+  //printf("process wait\n");
+
+  //------ temporary infinite loop
+  
+  while(1)
+  {
+
+  }
+  //------ temporary infinite loop end
+
   return -1;
 }
 
@@ -262,6 +277,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
+
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
@@ -272,7 +288,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   file = filesys_open (file_name);
   if (file == NULL) 
     {
-      printf ("load : %s: open failed\n", file_name);
+      printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
 
@@ -351,6 +367,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
+
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
@@ -414,15 +431,11 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
 /* Loads a segment starting at offset OFS in FILE at address
    UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
    memory are initialized, as follows:
-
         - READ_BYTES bytes at UPAGE must be read from FILE
           starting at offset OFS.
-
         - ZERO_BYTES bytes at UPAGE + READ_BYTES must be zeroed.
-
    The pages initialized by this function must be writable by the
    user process if WRITABLE is true, read-only otherwise.
-
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
 static bool
