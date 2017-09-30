@@ -1,7 +1,7 @@
-Copying tests/userprog/wait-simple into /tmp/fbhi4ExJrL.dsk...
-Copying tests/userprog/child-simple into /tmp/fbhi4ExJrL.dsk...
-Writing command line to /tmp/BoyBSlFdMB.dsk...
-qemu -hda /tmp/BoyBSlFdMB.dsk -hdb /tmp/bHeNcXJRp4.dsk -hdc /tmp/fbhi4ExJrL.dsk -m 4 -net none -nographic -monitor null
+Copying tests/userprog/wait-simple into /tmp/dJP3MWRFAI.dsk...
+Copying tests/userprog/child-simple into /tmp/dJP3MWRFAI.dsk...
+Writing command line to /tmp/3BMJn1tRaD.dsk...
+qemu -hda /tmp/3BMJn1tRaD.dsk -hdb /tmp/XNQiHKAze6.dsk -hdc /tmp/dJP3MWRFAI.dsk -m 4 -net none -nographic -monitor null
 Kernel command line: -q -f put wait-simple put child-simple run wait-simple
 Pintos booting with 4,096 kB RAM...
 375 pages available in kernel pool.
@@ -15,13 +15,17 @@ Boot complete.
 Putting 'wait-simple' into the file system...
 Putting 'child-simple' into the file system...
 Executing 'wait-simple':
+(wait-simple) begin
+(wait-simple) wait(exec()) = 39
+(wait-simple) end
+wait-simple: exit(0)
 Execution of 'wait-simple' complete.
-Timer: 54 ticks
-Thread: 30 idle ticks, 24 kernel ticks, 0 user ticks
+Timer: 57 ticks
+Thread: 30 idle ticks, 26 kernel ticks, 1 user ticks
 hd0:0: 0 reads, 0 writes
-hd0:1: 57 reads, 400 writes
+hd0:1: 86 reads, 400 writes
 hd1:0: 195 reads, 0 writes
-Console: 819 characters output
+Console: 910 characters output
 Keyboard: 0 keys pressed
 Exception: 0 page faults
 Powering off...

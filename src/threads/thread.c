@@ -220,6 +220,12 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  /* ---------------------------------------------------------------- */
+#ifdef USERPROG
+  t->parent = thread_current ();
+#endif
+  /* ---------------------------------------------------------------- */
+
   /* created thread have highest priority */
   if (priority > thread_current ()->priority) {
     thread_yield();
@@ -485,6 +491,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->priority_original = priority;
   list_init (&t->lock_list);
+  list_init (&t->child);
+
   t->magic = THREAD_MAGIC;
   t->lock_wait = NULL;
 }

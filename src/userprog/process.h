@@ -2,6 +2,15 @@
 #define USERPROG_PROCESS_H
 
 #include "threads/thread.h"
+#include "threads/synch.h"
+
+struct child{
+  tid_t tid;
+  int exit_stat;
+  struct list_elem elem;
+};
+
+struct lock lock;
 
 tid_t process_execute (const char *file_name);
 int process_wait (tid_t);

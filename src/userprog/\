@@ -13,7 +13,6 @@
 #include "filesys/filesys.h"
 #include "threads/flags.h"
 #include "threads/init.h"
-//#include "threads/synch.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
 #include "threads/thread.h"
@@ -30,14 +29,9 @@ tid_t
 process_execute (const char *file_name) 
 {
   struct thread *curr = thread_current();
-  struct child *child_info;
+  struct child child_info;
   char *fn_copy;
   tid_t tid;
-  lock_init (&lock);
-  lock_acquire(&lock);
-  child_info = palloc_get_page(0);
-  if (child_info == NULL)
-    return TID_ERROR;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -45,16 +39,15 @@ process_execute (const char *file_name)
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
-  char *save_ptr;
-  strtok_r (file_name," ", &save_ptr);
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy);
 
-  child_info->tid = tid;
-  list_push_back(&curr->child, &child_info->elem);
+  child_info.tid = tid;
+  list_push_back(&curr->child, &child_info.elem);
+  printf("child_info front = 
   return tid;
 }
 
@@ -66,7 +59,7 @@ start_process (void *f_name)
   char *file_name = f_name;
   struct intr_frame if_;
   bool success;
-  /* ----------------------------------------------------------------- */
+  /* --------------------------------------------------------------------- */
   int size = strlen(file_name) + 1;
   int argc=0; // It counts number of parsed argument
   char **argv; // It holds parsed argument
@@ -81,29 +74,29 @@ start_process (void *f_name)
     // address which arguments have to have in stack
     argc++;
   }
-  /* ----------------------------------------------------------------- */
+  /* --------------------------------------------------------------------- */
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
-  /* ----------------------------------------------------------------- */
+  /* --------------------------------------------------------------------- */
   /* Haney: From here, the value of arguments will be copied on stack      */
   if_.esp -= sizeof(char) * size;
   memcpy (if_.esp, file_name, size );
   if_.esp -= sizeof(char) * (size % 4) + sizeof(char *);
   // Amount of decrement in esp should include
-  // len of arguments variable (:which named 'file_name') and word-align
+  // length of arguments variable (:which named 'file_name') and word-align
   // and data of argv[argc] which is always 0. (Refer pintos manual 3.5.1)
-  /* Haney: From here, the address of arguments will copied on stack  */
+  /* Haney: From here, the address of arguments will be copied on stack    */
   int i;
   for(i = argc-1; i >= 0; i--){
     if_.esp -= sizeof(char *);
     memcpy (if_.esp, argv+i, sizeof(char *));
   }
 
-  /* Haney: From here, argv, argc, return address will copied on stack */
+  /* Haney: From here, argv, argc, return address will be copied on stack  */
   // argv
   char **temp_esp = if_.esp;
   if_.esp -= sizeof(char **);
@@ -117,11 +110,11 @@ start_process (void *f_name)
 
   palloc_free_page (file_name);
   palloc_free_page (argv);
-  /* ----------------------------------------------------------------- */
+  /* --------------------------------------------------------------------- */
   /* If load failed, quit. */
   if (!success) 
     thread_exit ();
-  lock_acquire(&lock);
+
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -144,22 +137,18 @@ start_process (void *f_name)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  struct thread* curr = thread_current ();
-  struct list_elem *e;
-  struct child *c;
-
-  lock_release(&lock);
-
   //check whether tid is child member of curr_process. If so...
-  for(e = list_begin(&curr->child);
-      e != list_end(&curr->child);
-      e = list_next (e)){
-    c = list_entry(e, struct child, elem);
-    if (c->tid == child_tid){
-      lock_acquire(&lock);
-      int exit_stat = c->exit_stat;
-      list_remove(e);
-      palloc_free_page(c);
+  struct thread* curr = thread_current ();
+  struct list_elem* match_elem;
+  struct child *child_process;
+  for(match_elem = list_begin(&curr->child);
+      match_elem != list_tail(&curr->child);
+      match_elem = list_next (match_elem)){
+    child_process = list_entry(match_elem, struct child, elem);
+    if (child_process->tid == child_tid){
+      thread_block();
+      int exit_stat = child_process->exit_stat;
+      list_remove(match_elem);
       return exit_stat;
     }
   }
