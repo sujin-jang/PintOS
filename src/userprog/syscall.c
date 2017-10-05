@@ -6,15 +6,17 @@
 #include "threads/thread.h"
 #include "threads/init.h"
 #include "threads/synch.h"
+#include "threads/vaddr.h"
 
 #include <string.h>
 #include <stdlib.h>
-
+ 
 extern struct lock lock;
 
 static void syscall_handler (struct intr_frame *);
-static void syscall_exit (struct intr_frame *f UNUSED);
+static void syscall_exit (struct intr_frame *f UNUSED, bool status);
 static void syscall_write (struct intr_frame *f UNUSED);
+static int get_user (const uint8_t *uaddr);
 
 void
 syscall_init (void) 
@@ -25,40 +27,49 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
-  // Haney: Why size_t?
-  //size_t *syscall_nr = (size_t *)(f->esp);
+  //struct thread* curr = thread_current();
   int *syscall_nr = (int *)(f->esp);
+  int i;
+
+  //Check whether stack pointer exceed PHYS_BASE
+  for(i = 0; i < 4; i++){ //Argument of syscall is no more than 3
+    if( ( get_user((uint8_t *)syscall_nr + 4 * i ) == -1 )
+        || ((void *)((uint8_t *)syscall_nr + 4 * i) >= PHYS_BASE) ){
+      syscall_exit(f, false);
+      
+    }
+  }
   switch (*syscall_nr) {
-    case SYS_HALT:
+    case SYS_HALT: //0
       power_off();
       break;
-  	case SYS_EXIT:
-      syscall_exit(f);
+  	case SYS_EXIT: //1
+      syscall_exit(f, true);
   		break;
-    case SYS_EXEC:
+    case SYS_EXEC: //2
       // const char *cmd_line = (const char *)(syscall_nr+1);
       // Not implemented
       break;
-  	case SYS_WAIT:
+  	case SYS_WAIT: //3
       // tid_t tid = (tid_t)(*(syscall_nr + 1));
       //process_wait(tid);
   		break; 
-    case SYS_CREATE:
+    case SYS_CREATE: //4
       // Not implemented
       break;
-    case SYS_REMOVE:
+    case SYS_REMOVE: //5
       // Not implemented
       break;
-    case SYS_OPEN:
+    case SYS_OPEN: //6
       // Not implemented
       break;
-    case SYS_FILESIZE:
+    case SYS_FILESIZE: //7
       // Not implemented
       break;
-    case SYS_READ:
+    case SYS_READ: //8
       // Not implemented
       break;
-  	case SYS_WRITE:
+  	case SYS_WRITE: //9
   		syscall_write(f);
   		break;
     case SYS_SEEK:
@@ -100,10 +111,20 @@ syscall_handler (struct intr_frame *f UNUSED)
       break;
   }
 }
+static int get_user (const uint8_t *uaddr){
+  int result;
+  asm ("movl $1f, %0; movzbl %1, %0; 1:"
+      : "=&a" (result) : "m" (*uaddr));
+  return result;
+}
 static void
-syscall_exit (struct intr_frame *f UNUSED)
+syscall_exit (struct intr_frame *f UNUSED, bool flag)
 {
-  int *syscall_nr = (int *)(f->esp);
+  int exit_stat;
+  if(flag == false)
+    exit_stat = -1;
+  else
+    exit_stat = *((int *)(f->esp)+1);
   struct thread *curr = thread_current();
   struct thread *parent = curr->parent;
   struct list_elem* e;
@@ -113,9 +134,9 @@ syscall_exit (struct intr_frame *f UNUSED)
       e = list_next (e)){
     child_process = list_entry(e, struct child, elem);
     if (child_process->tid == curr->tid)
-      child_process->exit_stat = *(syscall_nr + 1);
+      child_process->exit_stat = exit_stat;
   }
-  printf("%s: exit(%d)\n", curr->name, *(syscall_nr + 1));
+  printf("%s: exit(%d)\n", curr->name, exit_stat);
   lock_release(&lock);
   thread_exit();
 }
