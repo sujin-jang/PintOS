@@ -36,9 +36,12 @@ syscall_handler (struct intr_frame *f UNUSED)
     if( ( get_user((uint8_t *)syscall_nr + 4 * i ) == -1 )
         || ((void *)((uint8_t *)syscall_nr + 4 * i) >= PHYS_BASE) ){
       syscall_exit(f, false);
-      
     }
   }
+  void **arg1 = (void **)(syscall_nr+1);
+  //void **arg2 = (void **)(syscall_nr+2);
+  //void **arg3 = (void **)(syscall_nr+3);
+  //void **arg4 = (void **)(syscall_nr+4);
   switch (*syscall_nr) {
     case SYS_HALT: //0
       power_off();
@@ -47,12 +50,11 @@ syscall_handler (struct intr_frame *f UNUSED)
       syscall_exit(f, true);
   		break;
     case SYS_EXEC: //2
-      // const char *cmd_line = (const char *)(syscall_nr+1);
-      // Not implemented
+      printf("cmd_line = %s\n",*(char **)arg1);
+      process_execute(*(char **)arg1);
       break;
   	case SYS_WAIT: //3
-      // tid_t tid = (tid_t)(*(syscall_nr + 1));
-      //process_wait(tid);
+      process_wait(*(tid_t *)arg1);
   		break; 
     case SYS_CREATE: //4
       // Not implemented
@@ -111,6 +113,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       break;
   }
 }
+
 static int get_user (const uint8_t *uaddr){
   int result;
   asm ("movl $1f, %0; movzbl %1, %0; 1:"
