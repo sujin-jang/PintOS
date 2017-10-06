@@ -11,8 +11,6 @@
 #include <string.h>
 #include <stdlib.h>
  
-extern struct lock lock;
-
 static void syscall_handler (struct intr_frame *);
 static void syscall_exit (struct intr_frame *f UNUSED, bool status);
 static void syscall_write (struct intr_frame *f UNUSED);
@@ -30,7 +28,6 @@ syscall_handler (struct intr_frame *f UNUSED)
   //struct thread* curr = thread_current();
   int *syscall_nr = (int *)(f->esp);
   int i;
-
   //Check whether stack pointer exceed PHYS_BASE
   for(i = 0; i < 4; i++){ //Argument of syscall is no more than 3
     if( ( get_user((uint8_t *)syscall_nr + 4 * i ) == -1 )
@@ -50,11 +47,10 @@ syscall_handler (struct intr_frame *f UNUSED)
       syscall_exit(f, true);
   		break;
     case SYS_EXEC: //2
-      printf("cmd_line = %s\n",*(char **)arg1);
-      process_execute(*(char **)arg1);
+      f->eax = (uint32_t) process_execute(*(char **)arg1);
       break;
   	case SYS_WAIT: //3
-      process_wait(*(tid_t *)arg1);
+      f->eax = (uint32_t) process_wait(*(tid_t *)arg1);
   		break; 
     case SYS_CREATE: //4
       // Not implemented
@@ -140,7 +136,7 @@ syscall_exit (struct intr_frame *f UNUSED, bool flag)
       child_process->exit_stat = exit_stat;
   }
   printf("%s: exit(%d)\n", curr->name, exit_stat);
-  lock_release(&lock);
+  lock_release(curr->process_lock);
   thread_exit();
 }
 

@@ -102,6 +102,7 @@ struct thread
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
     struct thread* parent;      /* thread pointer of parent process */
+    struct lock* process_lock;  /* Lock for implement process wait */
 #endif
 
     /* Owned by thread.c. */
