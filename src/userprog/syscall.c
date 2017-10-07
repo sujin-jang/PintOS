@@ -7,6 +7,7 @@
 #include "threads/init.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "filesys/filesys.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -14,7 +15,13 @@
 static void syscall_handler (struct intr_frame *);
 static void syscall_exit (struct intr_frame *f UNUSED, bool status);
 static void syscall_write (struct intr_frame *f UNUSED);
+static bool syscall_create (struct intr_frame *f UNUSED, char *file, off_t initial_size);
+static int syscall_open (struct intr_frame *f UNUSED, char *file);
+static void syscall_close (struct intr_frame *f UNUSED, int fd);
+
 static int get_user (const uint8_t *uaddr);
+
+static int file_add_fdlist (struct file* file);
 
 void
 syscall_init (void) 
@@ -28,6 +35,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   //struct thread* curr = thread_current();
   int *syscall_nr = (int *)(f->esp);
   int i;
+
   //Check whether stack pointer exceed PHYS_BASE
   for(i = 0; i < 4; i++){ //Argument of syscall is no more than 3
     if( ( get_user((uint8_t *)syscall_nr + 4 * i ) == -1 )
@@ -35,10 +43,12 @@ syscall_handler (struct intr_frame *f UNUSED)
       syscall_exit(f, false);
     }
   }
+
   void **arg1 = (void **)(syscall_nr+1);
-  //void **arg2 = (void **)(syscall_nr+2);
+  void **arg2 = (void **)(syscall_nr+2);
   //void **arg3 = (void **)(syscall_nr+3);
   //void **arg4 = (void **)(syscall_nr+4);
+
   switch (*syscall_nr) {
     case SYS_HALT: //0
       power_off();
@@ -53,13 +63,14 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = (uint32_t) process_wait(*(tid_t *)arg1);
   		break; 
     case SYS_CREATE: //4
-      // Not implemented
+      // ASSERT ((size_t)*arg1 <= (size_t)PHYS_BASE);
+      f->eax = (uint32_t) syscall_create(f, *(char **)arg1, (off_t **) *arg2);
       break;
     case SYS_REMOVE: //5
       // Not implemented
       break;
     case SYS_OPEN: //6
-      // Not implemented
+      f->eax = (uint32_t) syscall_open(f, *(char **)arg1);
       break;
     case SYS_FILESIZE: //7
       // Not implemented
@@ -77,7 +88,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       // Not implemented
       break;
     case SYS_CLOSE:
-      // Not implemented
+      syscall_exit(f, (int **) *arg1);
       break;
 /* ---------------------------------------------------------------------*/
 /* 
@@ -116,6 +127,11 @@ static int get_user (const uint8_t *uaddr){
       : "=&a" (result) : "m" (*uaddr));
   return result;
 }
+
+/************************************************************
+*              system call helper function.                 *
+*************************************************************/
+
 static void
 syscall_exit (struct intr_frame *f UNUSED, bool flag)
 {
@@ -138,6 +154,8 @@ syscall_exit (struct intr_frame *f UNUSED, bool flag)
   printf("%s: exit(%d)\n", curr->name, exit_stat);
   lock_release(curr->process_lock);
   thread_exit();
+
+  // TODO: Close all fd in fd list
 }
 
 static void
@@ -154,3 +172,68 @@ syscall_write (struct intr_frame *f UNUSED)
  	//printf("%#010x\n", buf);
  	putbuf (buf, *size);
 }
+
+static bool
+syscall_create (struct intr_frame *f UNUSED, char *file, off_t initial_size)
+{
+  if (file == NULL)
+    syscall_exit(f, false);
+
+  return filesys_create (file, initial_size);
+}
+
+static int
+syscall_open (struct intr_frame *f UNUSED, char *file)
+{
+  if (file == NULL)
+    syscall_exit(f, false);
+
+  struct file* opened_file = filesys_open (file);
+
+  if (opened_file == NULL)
+    return -1;
+
+  return file_add_fdlist(opened_file);
+}
+
+static void
+syscall_close (struct intr_frame *f UNUSED, int fd)
+{
+  // 아무것도 안해도 test를 pass하는 기적..
+  // TODO:
+  // 1. fd_list에서 remove..
+  // 2. fd_list에서 name 가져와서 filesys_remove (const char *name) .. 귀찮다.. 내일하자..
+}
+
+/************************************************************
+*      struct and function for file descriptor table.       *
+*************************************************************/
+
+struct file_descriptor
+{
+  int fd;
+  struct file* file;
+  struct list_elem elem;
+};
+
+static int
+file_add_fdlist (struct file* file)
+{
+  struct thread *curr = thread_current ();
+  struct file_descriptor *desc = malloc(sizeof *desc);
+  memset (desc, 0, sizeof *desc);
+
+  curr->fd++;
+
+  desc->fd = curr->fd;
+  desc->file = file;
+
+  list_push_back (&curr->fd_list, &desc->elem);
+
+  return curr->fd;
+}
+
+/* TODO:
+  file system lock
+  pointer validity check
+  Make.tests Line 17: TIMEOUT = 60 */

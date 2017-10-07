@@ -493,6 +493,11 @@ init_thread (struct thread *t, const char *name, int priority)
   list_init (&t->lock_list);
   list_init (&t->child);
 
+#ifdef USERPROG
+  t->fd = 1; // start from 2 (0, 1: STDIN, STDOUT)
+  list_init (&t->fd_list);
+#endif
+
   t->magic = THREAD_MAGIC;
   t->lock_wait = NULL;
 }

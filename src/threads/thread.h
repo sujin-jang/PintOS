@@ -103,6 +103,9 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
     struct thread* parent;      /* thread pointer of parent process */
     struct lock* process_lock;  /* Lock for implement process wait */
+
+    int fd;
+    struct list fd_list;
 #endif
 
     /* Owned by thread.c. */
