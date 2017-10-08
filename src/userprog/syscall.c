@@ -14,9 +14,11 @@
 
 #include <string.h>
 #include <stdlib.h>
+
+#define EXIT_STATUS_1 -1
  
 static void syscall_handler (struct intr_frame *);
-static void syscall_exit (struct intr_frame *f UNUSED, bool status);
+static void syscall_exit (struct intr_frame *f UNUSED, int status);
 static bool syscall_create (char *file, off_t initial_size);
 static int syscall_open (char *file);
 static void syscall_close (int fd);
@@ -25,7 +27,7 @@ static int syscall_filesize (int fd);
 static int syscall_write (int fd, void *buffer, unsigned size);
 
 static int get_user (const uint8_t *uaddr);
-static void is_valid_ptr(struct intr_frame *f UNUSED, void *uaddr);
+static void is_valid_ptr (struct intr_frame *f UNUSED, void *uaddr);
 
 static int file_add_fdlist (struct file* file);
 static void file_remove_fdlist (int fd);
@@ -48,7 +50,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   for(i = 0; i < 4; i++){ //Argument of syscall is no more than 3
     if( ( get_user((uint8_t *)syscall_nr + 4 * i ) == -1 )
         || is_kernel_vaddr ((void *)((uint8_t *)syscall_nr + 4 * i)) ){
-      syscall_exit(f, false);
+      syscall_exit(f, EXIT_STATUS_1);
     }
   }
 
@@ -62,9 +64,10 @@ syscall_handler (struct intr_frame *f UNUSED)
       power_off();
       break;
     case SYS_EXIT: //1
-      syscall_exit(f, true);
+      syscall_exit(f, (int)*arg1);
       break;
     case SYS_EXEC: //2
+      is_valid_ptr(f, *(void **)arg1);
       f->eax = (uint32_t) process_execute(*(char **)arg1);
       break;
     case SYS_WAIT: //3
@@ -142,21 +145,18 @@ static int get_user (const uint8_t *uaddr){
 /* Handle invalid memory access:
    exit(-1) when UADDR is kernel vaddr or unmapped to pagedir of current process */
 
-// TODO: kernel vaddr는 위에서 다 검사한거 아닌가? ㅇㅅㅇ
-
 static void
 is_valid_ptr(struct intr_frame *f UNUSED, void *uaddr)
 {
   if (is_kernel_vaddr(uaddr))
-    syscall_exit(f, false);
+    syscall_exit(f, EXIT_STATUS_1);
 
   struct thread* curr = thread_current ();
   uint32_t *pd = curr->pagedir;
-  
   uint32_t *is_bad_ptr = pagedir_get_page (pd, uaddr);
   
   if(is_bad_ptr == NULL)
-    syscall_exit(f, false);
+    syscall_exit(f, EXIT_STATUS_1);
 }
 
 /************************************************************
@@ -175,7 +175,6 @@ file_add_fdlist (struct file* file)
 {
   struct thread *curr = thread_current ();
   struct file_descriptor *desc = malloc(sizeof *desc);
-  memset (desc, 0, sizeof *desc);
 
   curr->fd++;
 
@@ -197,7 +196,7 @@ file_remove_fdlist (int fd)
 
   file_close (desc->file);
   list_remove (&desc->elem);
-  // TODO: free memory 
+  free(desc);
 }
 
 static struct file_descriptor *
@@ -211,9 +210,7 @@ fd_to_file_descriptor (int fd)
   {
     desc = list_entry(iter, struct file_descriptor, elem);
     if (desc->fd == fd)
-    {
       return desc;
-    }
   }
   return NULL;
 }
@@ -223,25 +220,23 @@ fd_to_file_descriptor (int fd)
 *************************************************************/
 
 static void
-syscall_exit (struct intr_frame *f UNUSED, bool flag)
+syscall_exit (struct intr_frame *f UNUSED, int status)
 {
-  int exit_stat;
-  if(flag == false)
-    exit_stat = -1;
-  else
-    exit_stat = *((int *)(f->esp)+1);
   struct thread *curr = thread_current();
   struct thread *parent = curr->parent;
   struct list_elem* e;
   struct child *child_process;
+
   for(e = list_begin(&parent->child);
       e != list_end (&parent->child);
-      e = list_next (e)){
+      e = list_next (e))
+  {
     child_process = list_entry(e, struct child, elem);
     if (child_process->tid == curr->tid)
-      child_process->exit_stat = exit_stat;
+      child_process->exit_stat = status;
   }
-  printf("%s: exit(%d)\n", curr->name, exit_stat);
+
+  printf("%s: exit(%d)\n", curr->name, status);
   lock_release(curr->process_lock);
   thread_exit();
 
@@ -311,6 +306,6 @@ syscall_write (int fd, void *buffer, unsigned size)
 
 /* TODO:
   file system lock
-  pointer validity check
   Make.tests Line 17: TIMEOUT = 60
-  /userprog/no-vm/Make.tests : TIMEOUT = 360 */
+  /userprog/no-vm/Make.tests : TIMEOUT = 360
+  */
