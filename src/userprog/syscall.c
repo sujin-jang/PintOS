@@ -7,21 +7,27 @@
 #include "threads/init.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+
 #include "filesys/filesys.h"
+#include "filesys/file.h"
 
 #include <string.h>
 #include <stdlib.h>
  
 static void syscall_handler (struct intr_frame *);
 static void syscall_exit (struct intr_frame *f UNUSED, bool status);
-static void syscall_write (struct intr_frame *f UNUSED);
 static bool syscall_create (struct intr_frame *f UNUSED, char *file, off_t initial_size);
 static int syscall_open (struct intr_frame *f UNUSED, char *file);
 static void syscall_close (struct intr_frame *f UNUSED, int fd);
+static int syscall_read (struct intr_frame *f UNUSED, int fd, void *buffer, unsigned length);
+static int syscall_filesize (struct intr_frame *f UNUSED, int fd);
+static int syscall_write (struct intr_frame *f UNUSED, int fd, void *buffer, unsigned size);
 
 static int get_user (const uint8_t *uaddr);
 
 static int file_add_fdlist (struct file* file);
+static void file_remove_fdlist (int fd);
+static struct file_descriptor * fd_to_file_descriptor (int fd);
 
 void
 syscall_init (void) 
@@ -35,6 +41,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   //struct thread* curr = thread_current();
   int *syscall_nr = (int *)(f->esp);
   int i;
+  int res;
 
   //Check whether stack pointer exceed PHYS_BASE
   for(i = 0; i < 4; i++){ //Argument of syscall is no more than 3
@@ -46,7 +53,7 @@ syscall_handler (struct intr_frame *f UNUSED)
 
   void **arg1 = (void **)(syscall_nr+1);
   void **arg2 = (void **)(syscall_nr+2);
-  //void **arg3 = (void **)(syscall_nr+3);
+  void **arg3 = (void **)(syscall_nr+3);
   //void **arg4 = (void **)(syscall_nr+4);
 
   switch (*syscall_nr) {
@@ -63,8 +70,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = (uint32_t) process_wait(*(tid_t *)arg1);
   		break; 
     case SYS_CREATE: //4
-      // ASSERT ((size_t)*arg1 <= (size_t)PHYS_BASE);
-      f->eax = (uint32_t) syscall_create(f, *(char **)arg1, (off_t **) *arg2);
+      f->eax = (uint32_t) syscall_create(f, *(char **)arg1, (off_t)*arg2);
       break;
     case SYS_REMOVE: //5
       // Not implemented
@@ -73,13 +79,13 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = (uint32_t) syscall_open(f, *(char **)arg1);
       break;
     case SYS_FILESIZE: //7
-      // Not implemented
+      f->eax = (uint32_t) syscall_filesize(f, (int)*arg1);
       break;
     case SYS_READ: //8
-      // Not implemented
+      f->eax = (uint32_t) syscall_read(f, (int)*arg1, *(void **)arg2, (unsigned)*arg3);
       break;
   	case SYS_WRITE: //9
-  		syscall_write(f);
+  		f->eax = (uint32_t) syscall_write (f, (int)*arg1, *(void **)arg2, (unsigned)*arg3);
   		break;
     case SYS_SEEK:
       // Not implemented
@@ -88,7 +94,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       // Not implemented
       break;
     case SYS_CLOSE:
-      syscall_exit(f, (int **) *arg1);
+      syscall_close(f, (int)*arg1);
       break;
 /* ---------------------------------------------------------------------*/
 /* 
@@ -129,6 +135,65 @@ static int get_user (const uint8_t *uaddr){
 }
 
 /************************************************************
+*      struct and function for file descriptor table.       *
+*************************************************************/
+
+struct file_descriptor
+{
+  int fd;
+  struct file* file;
+  struct list_elem elem;
+};
+
+static int
+file_add_fdlist (struct file* file)
+{
+  struct thread *curr = thread_current ();
+  struct file_descriptor *desc = malloc(sizeof *desc);
+  memset (desc, 0, sizeof *desc);
+
+  curr->fd++;
+
+  desc->fd = curr->fd;
+  desc->file = file;
+
+  list_push_back (&curr->fd_list, &desc->elem);
+
+  return curr->fd;
+}
+
+static void
+file_remove_fdlist (int fd)
+{
+  struct file_descriptor *desc = fd_to_file_descriptor(fd);
+
+  if (desc == NULL)
+    return;
+
+  file_close (desc->file);
+  list_remove (&desc->elem);
+  // TODO: free memory 
+}
+
+static struct file_descriptor *
+fd_to_file_descriptor (int fd)
+{
+  struct thread *curr = thread_current ();
+  struct list_elem *iter;
+  struct file_descriptor *desc;
+
+  for (iter = list_begin (&curr->fd_list); iter != list_end (&curr->fd_list); iter = list_next (iter))
+  {
+    desc = list_entry(iter, struct file_descriptor, elem);
+    if (desc->fd == fd)
+    {
+      return desc;
+    }
+  }
+  return NULL;
+}
+
+/************************************************************
 *              system call helper function.                 *
 *************************************************************/
 
@@ -158,21 +223,6 @@ syscall_exit (struct intr_frame *f UNUSED, bool flag)
   // TODO: Close all fd in fd list
 }
 
-static void
-syscall_write (struct intr_frame *f UNUSED)
-{
- 	/* if fd == 1 */
- 	/* STDOUT: write to console */
-
- 	size_t *size = (size_t *)(f->esp + 0X0C);
- 	size_t *buf_temp = (size_t *)(f->esp + 0X08);
- 	const char * buf = (const char *)(*buf_temp);
-
- 	//printf("%#010x\n", *size);
- 	//printf("%#010x\n", buf);
- 	putbuf (buf, *size);
-}
-
 static bool
 syscall_create (struct intr_frame *f UNUSED, char *file, off_t initial_size)
 {
@@ -199,41 +249,49 @@ syscall_open (struct intr_frame *f UNUSED, char *file)
 static void
 syscall_close (struct intr_frame *f UNUSED, int fd)
 {
-  // 아무것도 안해도 test를 pass하는 기적..
-  // TODO:
-  // 1. fd_list에서 remove..
-  // 2. fd_list에서 name 가져와서 filesys_remove (const char *name) .. 귀찮다.. 내일하자..
+  file_remove_fdlist (fd);
 }
 
-/************************************************************
-*      struct and function for file descriptor table.       *
-*************************************************************/
-
-struct file_descriptor
+static int
+syscall_read (struct intr_frame *f UNUSED, int fd, void *buffer, unsigned length)
 {
-  int fd;
-  struct file* file;
-  struct list_elem elem;
-};
+  if (fd == 0) /* STDIN */
+    return input_getc();
+
+  struct file_descriptor *desc = fd_to_file_descriptor(fd);
+
+  if (desc == NULL)
+    return -1;
+
+  return file_read (desc->file, buffer, length);
+}
 
 static int
-file_add_fdlist (struct file* file)
+syscall_filesize (struct intr_frame *f UNUSED, int fd)
 {
-  struct thread *curr = thread_current ();
-  struct file_descriptor *desc = malloc(sizeof *desc);
-  memset (desc, 0, sizeof *desc);
+  struct file_descriptor *desc = fd_to_file_descriptor(fd);
+  return file_length(desc->file);
+}
 
-  curr->fd++;
+static int
+syscall_write (struct intr_frame *f UNUSED, int fd, void *buffer, unsigned size)
+{
+  if (fd == 1) /* STDOUT */
+  {
+    putbuf (buffer, size);
+    return size;
+  }
 
-  desc->fd = curr->fd;
-  desc->file = file;
+  struct file_descriptor *desc = fd_to_file_descriptor(fd);
 
-  list_push_back (&curr->fd_list, &desc->elem);
+  if (desc == NULL)
+    return -1;
 
-  return curr->fd;
+  return file_write (desc->file, buffer, size);
 }
 
 /* TODO:
   file system lock
   pointer validity check
-  Make.tests Line 17: TIMEOUT = 60 */
+  Make.tests Line 17: TIMEOUT = 60
+  /userprog/no-vm/Make.tests : TIMEOUT = 360 */
