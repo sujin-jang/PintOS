@@ -1,5 +1,6 @@
 #include "userprog/syscall.h"
 #include "userprog/process.h"
+#include "userprog/pagedir.h"
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
@@ -16,14 +17,15 @@
  
 static void syscall_handler (struct intr_frame *);
 static void syscall_exit (struct intr_frame *f UNUSED, bool status);
-static bool syscall_create (struct intr_frame *f UNUSED, char *file, off_t initial_size);
-static int syscall_open (struct intr_frame *f UNUSED, char *file);
-static void syscall_close (struct intr_frame *f UNUSED, int fd);
-static int syscall_read (struct intr_frame *f UNUSED, int fd, void *buffer, unsigned length);
-static int syscall_filesize (struct intr_frame *f UNUSED, int fd);
-static int syscall_write (struct intr_frame *f UNUSED, int fd, void *buffer, unsigned size);
+static bool syscall_create (char *file, off_t initial_size);
+static int syscall_open (char *file);
+static void syscall_close (int fd);
+static int syscall_read (int fd, void *buffer, unsigned length);
+static int syscall_filesize (int fd);
+static int syscall_write (int fd, void *buffer, unsigned size);
 
 static int get_user (const uint8_t *uaddr);
+static void is_valid_ptr(struct intr_frame *f UNUSED, void *uaddr);
 
 static int file_add_fdlist (struct file* file);
 static void file_remove_fdlist (int fd);
@@ -41,12 +43,11 @@ syscall_handler (struct intr_frame *f UNUSED)
   //struct thread* curr = thread_current();
   int *syscall_nr = (int *)(f->esp);
   int i;
-  int res;
 
   //Check whether stack pointer exceed PHYS_BASE
   for(i = 0; i < 4; i++){ //Argument of syscall is no more than 3
     if( ( get_user((uint8_t *)syscall_nr + 4 * i ) == -1 )
-        || ((void *)((uint8_t *)syscall_nr + 4 * i) >= PHYS_BASE) ){
+        || is_kernel_vaddr ((void *)((uint8_t *)syscall_nr + 4 * i)) ){
       syscall_exit(f, false);
     }
   }
@@ -60,33 +61,37 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_HALT: //0
       power_off();
       break;
-  	case SYS_EXIT: //1
+    case SYS_EXIT: //1
       syscall_exit(f, true);
-  		break;
+      break;
     case SYS_EXEC: //2
       f->eax = (uint32_t) process_execute(*(char **)arg1);
       break;
-  	case SYS_WAIT: //3
+    case SYS_WAIT: //3
       f->eax = (uint32_t) process_wait(*(tid_t *)arg1);
-  		break; 
+      break; 
     case SYS_CREATE: //4
-      f->eax = (uint32_t) syscall_create(f, *(char **)arg1, (off_t)*arg2);
+      is_valid_ptr(f, *(void **)arg1);
+      f->eax = (uint32_t) syscall_create(*(char **)arg1, (off_t)*arg2);
       break;
     case SYS_REMOVE: //5
       // Not implemented
       break;
     case SYS_OPEN: //6
-      f->eax = (uint32_t) syscall_open(f, *(char **)arg1);
+      is_valid_ptr(f, *(void **)arg1);
+      f->eax = (uint32_t) syscall_open(*(char **)arg1);
       break;
     case SYS_FILESIZE: //7
-      f->eax = (uint32_t) syscall_filesize(f, (int)*arg1);
+      f->eax = (uint32_t) syscall_filesize((int)*arg1);
       break;
     case SYS_READ: //8
-      f->eax = (uint32_t) syscall_read(f, (int)*arg1, *(void **)arg2, (unsigned)*arg3);
+      is_valid_ptr(f, *(void **)arg2);
+      f->eax = (uint32_t) syscall_read((int)*arg1, *(void **)arg2, (unsigned)*arg3);
       break;
-  	case SYS_WRITE: //9
-  		f->eax = (uint32_t) syscall_write (f, (int)*arg1, *(void **)arg2, (unsigned)*arg3);
-  		break;
+    case SYS_WRITE: //9
+      is_valid_ptr(f, *(void **)arg2);
+      f->eax = (uint32_t) syscall_write ((int)*arg1, *(void **)arg2, (unsigned)*arg3);
+      break;
     case SYS_SEEK:
       // Not implemented
       break;
@@ -94,7 +99,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       // Not implemented
       break;
     case SYS_CLOSE:
-      syscall_close(f, (int)*arg1);
+      syscall_close((int)*arg1);
       break;
 /* ---------------------------------------------------------------------*/
 /* 
@@ -132,6 +137,26 @@ static int get_user (const uint8_t *uaddr){
   asm ("movl $1f, %0; movzbl %1, %0; 1:"
       : "=&a" (result) : "m" (*uaddr));
   return result;
+}
+
+/* Handle invalid memory access:
+   exit(-1) when UADDR is kernel vaddr or unmapped to pagedir of current process */
+
+// TODO: kernel vaddr는 위에서 다 검사한거 아닌가? ㅇㅅㅇ
+
+static void
+is_valid_ptr(struct intr_frame *f UNUSED, void *uaddr)
+{
+  if (is_kernel_vaddr(uaddr))
+    syscall_exit(f, false);
+
+  struct thread* curr = thread_current ();
+  uint32_t *pd = curr->pagedir;
+  
+  uint32_t *is_bad_ptr = pagedir_get_page (pd, uaddr);
+  
+  if(is_bad_ptr == NULL)
+    syscall_exit(f, false);
 }
 
 /************************************************************
@@ -224,20 +249,14 @@ syscall_exit (struct intr_frame *f UNUSED, bool flag)
 }
 
 static bool
-syscall_create (struct intr_frame *f UNUSED, char *file, off_t initial_size)
+syscall_create (char *file, off_t initial_size)
 {
-  if (file == NULL)
-    syscall_exit(f, false);
-
   return filesys_create (file, initial_size);
 }
 
 static int
-syscall_open (struct intr_frame *f UNUSED, char *file)
+syscall_open (char *file)
 {
-  if (file == NULL)
-    syscall_exit(f, false);
-
   struct file* opened_file = filesys_open (file);
 
   if (opened_file == NULL)
@@ -247,13 +266,13 @@ syscall_open (struct intr_frame *f UNUSED, char *file)
 }
 
 static void
-syscall_close (struct intr_frame *f UNUSED, int fd)
+syscall_close (int fd)
 {
   file_remove_fdlist (fd);
 }
 
 static int
-syscall_read (struct intr_frame *f UNUSED, int fd, void *buffer, unsigned length)
+syscall_read (int fd, void *buffer, unsigned length)
 {
   if (fd == 0) /* STDIN */
     return input_getc();
@@ -267,14 +286,14 @@ syscall_read (struct intr_frame *f UNUSED, int fd, void *buffer, unsigned length
 }
 
 static int
-syscall_filesize (struct intr_frame *f UNUSED, int fd)
+syscall_filesize (int fd)
 {
   struct file_descriptor *desc = fd_to_file_descriptor(fd);
   return file_length(desc->file);
 }
 
 static int
-syscall_write (struct intr_frame *f UNUSED, int fd, void *buffer, unsigned size)
+syscall_write (int fd, void *buffer, unsigned size)
 {
   if (fd == 1) /* STDOUT */
   {
