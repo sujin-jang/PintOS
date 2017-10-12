@@ -18,13 +18,14 @@
 #define EXIT_STATUS_1 -1
  
 static void syscall_handler (struct intr_frame *);
-static void syscall_exit (struct intr_frame *f UNUSED, int status);
+//static void syscall_exit (int status);
 static bool syscall_create (char *file, off_t initial_size);
 static int syscall_open (char *file);
 static void syscall_close (int fd);
 static int syscall_read (int fd, void *buffer, unsigned length);
 static int syscall_filesize (int fd);
 static int syscall_write (int fd, void *buffer, unsigned size);
+static bool syscall_remove (const char *file);
 
 static int get_user (const uint8_t *uaddr);
 static void is_valid_ptr (struct intr_frame *f UNUSED, void *uaddr);
@@ -33,10 +34,14 @@ static int file_add_fdlist (struct file* file);
 static void file_remove_fdlist (int fd);
 static struct file_descriptor * fd_to_file_descriptor (int fd);
 
+struct lock *lock_file;
+
 void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+  lock_file = malloc(sizeof *lock_file); //TODO: free
+  lock_init (lock_file);
 }
 
 static void
@@ -50,7 +55,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   for(i = 0; i < 4; i++){ //Argument of syscall is no more than 3
     if( ( get_user((uint8_t *)syscall_nr + 4 * i ) == -1 )
         || is_kernel_vaddr ((void *)((uint8_t *)syscall_nr + 4 * i)) ){
-      syscall_exit(f, EXIT_STATUS_1);
+      syscall_exit(EXIT_STATUS_1);
     }
   }
 
@@ -64,7 +69,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       power_off();
       break;
     case SYS_EXIT: //1
-      syscall_exit(f, (int)*arg1);
+      syscall_exit((int)*arg1);
       break;
     case SYS_EXEC: //2
       is_valid_ptr(f, *(void **)arg1);
@@ -78,7 +83,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = (uint32_t) syscall_create(*(char **)arg1, (off_t)*arg2);
       break;
     case SYS_REMOVE: //5
-      // Not implemented
+      f->eax = (uint32_t) syscall_remove (*(char **)arg1);
       break;
     case SYS_OPEN: //6
       is_valid_ptr(f, *(void **)arg1);
@@ -93,6 +98,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       break;
     case SYS_WRITE: //9
       is_valid_ptr(f, *(void **)arg2);
+      if((int)*arg1 == 0) syscall_exit(EXIT_STATUS_1); //STDIN은 exit/ todo: valid ptr 안에 집어넣기
       f->eax = (uint32_t) syscall_write ((int)*arg1, *(void **)arg2, (unsigned)*arg3);
       break;
     case SYS_SEEK:
@@ -149,14 +155,14 @@ static void
 is_valid_ptr(struct intr_frame *f UNUSED, void *uaddr)
 {
   if (is_kernel_vaddr(uaddr))
-    syscall_exit(f, EXIT_STATUS_1);
+    syscall_exit(EXIT_STATUS_1);
 
   struct thread* curr = thread_current ();
   uint32_t *pd = curr->pagedir;
   uint32_t *is_bad_ptr = pagedir_get_page (pd, uaddr);
   
   if(is_bad_ptr == NULL)
-    syscall_exit(f, EXIT_STATUS_1);
+    syscall_exit(EXIT_STATUS_1);
 }
 
 /************************************************************
@@ -219,8 +225,8 @@ fd_to_file_descriptor (int fd)
 *              system call helper function.                 *
 *************************************************************/
 
-static void
-syscall_exit (struct intr_frame *f UNUSED, int status)
+void
+syscall_exit (int status)
 {
   struct thread *curr = thread_current();
   struct thread *parent = curr->parent;
@@ -253,18 +259,23 @@ syscall_create (char *file, off_t initial_size)
 static int
 syscall_open (char *file)
 {
+  lock_acquire(lock_file);
   struct file* opened_file = filesys_open (file);
 
   if (opened_file == NULL)
     return -1;
 
-  return file_add_fdlist(opened_file);
+  int result = file_add_fdlist(opened_file);
+  lock_release(lock_file);
+  return result;
 }
 
 static void
 syscall_close (int fd)
 {
+  lock_acquire(lock_file);
   file_remove_fdlist (fd);
+  lock_release(lock_file);
 }
 
 static int
@@ -273,36 +284,63 @@ syscall_read (int fd, void *buffer, unsigned length)
   if (fd == 0) /* STDIN */
     return input_getc();
 
+  lock_acquire(lock_file);
+
   struct file_descriptor *desc = fd_to_file_descriptor(fd);
 
   if (desc == NULL)
+  {
+    lock_release(lock_file);
     return -1;
+  }
 
-  return file_read (desc->file, buffer, length);
+  int result = file_read (desc->file, buffer, length);
+
+  lock_release(lock_file);
+  return result;
 }
 
 static int
 syscall_filesize (int fd)
 {
+  lock_acquire(lock_file);
   struct file_descriptor *desc = fd_to_file_descriptor(fd);
-  return file_length(desc->file);
+  int result = file_length(desc->file);
+
+  lock_release(lock_file);
+  return result;
 }
 
 static int
 syscall_write (int fd, void *buffer, unsigned size)
 {
+
   if (fd == 1) /* STDOUT */
   {
     putbuf (buffer, size);
     return size;
   }
 
+  lock_acquire(lock_file);
+
   struct file_descriptor *desc = fd_to_file_descriptor(fd);
 
   if (desc == NULL)
+  {
+    lock_release(lock_file);
     return -1;
+  }
 
-  return file_write (desc->file, buffer, size);
+  int result = file_write (desc->file, buffer, size);
+
+  lock_release(lock_file);
+  return result;
+}
+
+static bool
+syscall_remove (const char *file)
+{
+  return filesys_remove (file); 
 }
 
 /* TODO:
