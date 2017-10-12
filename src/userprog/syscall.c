@@ -28,6 +28,7 @@ static int syscall_write (int fd, void *buffer, unsigned size);
 static bool syscall_remove (const char *file);
 static bool syscall_seem (const char *file);
 static void syscall_seek (int fd, unsigned position);
+static unsigned syscall_tell (int fd);
 
 static int get_user (const uint8_t *uaddr);
 static void is_valid_ptr (struct intr_frame *f UNUSED, void *uaddr);
@@ -342,7 +343,11 @@ syscall_write (int fd, void *buffer, unsigned size)
 static bool
 syscall_remove (const char *file)
 {
-  return filesys_remove (file); 
+  lock_acquire(lock_file);
+  bool result = filesys_remove (file);
+  lock_release(lock_file);
+
+  return result;
 }
 
 static void
@@ -355,11 +360,29 @@ syscall_seek (int fd, unsigned position)
   if (desc == NULL)
   {
     lock_release(lock_file);
-    return -1;
   }
 
   file_seek (desc->file, position);
   lock_release(lock_file);
+}
+
+static unsigned
+syscall_tell (int fd)
+{
+  lock_acquire(lock_file);
+
+  struct file_descriptor *desc = fd_to_file_descriptor(fd);
+
+  if (desc == NULL)
+  {
+    lock_release(lock_file);
+    return 0; //todo: error handling right?
+  }
+
+  unsigned result = file_tell (desc->file);
+  lock_release(lock_file);
+
+  return result;
 }
 
 
