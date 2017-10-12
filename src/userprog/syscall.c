@@ -26,6 +26,8 @@ static int syscall_read (int fd, void *buffer, unsigned length);
 static int syscall_filesize (int fd);
 static int syscall_write (int fd, void *buffer, unsigned size);
 static bool syscall_remove (const char *file);
+static bool syscall_seem (const char *file);
+static void syscall_seek (int fd, unsigned position);
 
 static int get_user (const uint8_t *uaddr);
 static void is_valid_ptr (struct intr_frame *f UNUSED, void *uaddr);
@@ -102,7 +104,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = (uint32_t) syscall_write ((int)*arg1, *(void **)arg2, (unsigned)*arg3);
       break;
     case SYS_SEEK:
-      // Not implemented
+      syscall_seek ((int)*arg1, (unsigned)*arg2);
       break;
     case SYS_TELL:
       // Not implemented
@@ -342,6 +344,24 @@ syscall_remove (const char *file)
 {
   return filesys_remove (file); 
 }
+
+static void
+syscall_seek (int fd, unsigned position)
+{
+  lock_acquire(lock_file);
+
+  struct file_descriptor *desc = fd_to_file_descriptor(fd);
+
+  if (desc == NULL)
+  {
+    lock_release(lock_file);
+    return -1;
+  }
+
+  file_seek (desc->file, position);
+  lock_release(lock_file);
+}
+
 
 /* TODO:
   file system lock
