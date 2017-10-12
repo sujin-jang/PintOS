@@ -226,21 +226,22 @@ syscall_exit (struct intr_frame *f UNUSED, int status)
   struct thread *parent = curr->parent;
   struct list_elem* e;
   struct child *child_process;
-
+ 
   for(e = list_begin(&parent->child);
       e != list_end (&parent->child);
       e = list_next (e))
   {
     child_process = list_entry(e, struct child, elem);
-    if (child_process->tid == curr->tid)
+    if (child_process->tid == curr->tid){
       child_process->exit_stat = status;
+      printf("%s: exit(%d)\n", curr->name, status);
+      sema_up(curr->process_sema);
+      thread_exit();
+
+      // TODO: Close all fd in fd list
+    }
   }
-
-  printf("%s: exit(%d)\n", curr->name, status);
-  lock_release(curr->process_lock);
-  thread_exit();
-
-  // TODO: Close all fd in fd list
+  NOT_REACHED();
 }
 
 static bool

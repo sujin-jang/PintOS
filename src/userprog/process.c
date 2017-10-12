@@ -22,8 +22,8 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
-struct lock *lock_addr;
-
+struct semaphore *sema_addr;
+bool load_flag;
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -48,15 +48,19 @@ process_execute (const char *file_name)
   char *save_ptr;
   strtok_r (file_name," ", &save_ptr);
 
+  sema_addr = &child_info->sema;
+  sema_init (&child_info->sema, 0);
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  lock_addr = &child_info->lock;
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy);
-  lock_init (&child_info->lock);
-  lock_acquire (&child_info->lock);
   child_info->tid = tid;
   list_push_back(&curr->child, &child_info->elem);
+  sema_down (&child_info->sema);
+  if(!load_flag){
+   tid = -1;
+  }  // Check load succesfull
+  sema_up(&child_info->sema);
   return tid;
 }
 
@@ -65,8 +69,7 @@ process_execute (const char *file_name)
 static void
 start_process (void *f_name)
 {
-  lock_acquire(lock_addr);
-  thread_current()->process_lock = lock_addr;
+  thread_current()->process_sema = sema_addr;
   char *file_name = f_name;
   struct intr_frame if_;
   bool success;
@@ -92,10 +95,19 @@ start_process (void *f_name)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
+  load_flag = success;
+  /* If load failed, quit. */ 
+  if (!success){
+    palloc_free_page (file_name);
+    palloc_free_page (argv);
+    sema_up(thread_current()->process_sema);
+    thread_exit ();
+  }
   /* ----------------------------------------------------------------- */
   /* Haney: From here, the value of arguments will be copied on stack      */
   if_.esp -= sizeof(char) * size;
   memcpy (if_.esp, file_name, size );
+  ASSERT( success == 1);
   if_.esp -= sizeof(char) * (size % 4) + sizeof(char *);
   // Amount of decrement in esp should include
   // len of arguments variable (:which named 'file_name') and word-align
@@ -121,10 +133,9 @@ start_process (void *f_name)
 
   palloc_free_page (file_name);
   palloc_free_page (argv);
+  sema_up(thread_current()->process_sema);
   /* ----------------------------------------------------------------- */
-  /* If load failed, quit. */
-  if (!success) 
-    thread_exit ();
+  sema_down(thread_current()->process_sema);
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -157,10 +168,9 @@ process_wait (tid_t child_tid UNUSED)
       e = list_next (e)){
     c = list_entry(e, struct child, elem);
     if (c->tid == child_tid){
-      lock_release(&c->lock); // Let child process acquire this lock
-      lock_acquire(&c->lock);
+      sema_down(&c->sema);
       int exit_stat = c->exit_stat;
-      lock_release(&c->lock);
+      sema_up(&c->sema);
       list_remove(e);
       palloc_free_page(c);
       return exit_stat;
