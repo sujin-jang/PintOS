@@ -185,6 +185,10 @@ process_exit (void)
 {
   struct thread *curr = thread_current ();
   uint32_t *pd;
+
+  struct file *file = curr->executable;
+  if (file != NULL)
+    file_allow_write (file); 
   
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -399,7 +403,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   success = true;
 
   file_deny_write (file); //todo: terminate 되면 file close 하기, executable file store
-  //t->executable = file;
+  t->executable = file;
 
  done:
   /* We arrive here whether the load is successful or not. */

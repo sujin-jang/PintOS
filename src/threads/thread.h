@@ -106,6 +106,7 @@ struct thread
 
     int fd;
     struct list fd_list;
+    struct file* executable;
 #endif
 
     /* Owned by thread.c. */
