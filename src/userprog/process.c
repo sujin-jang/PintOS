@@ -107,7 +107,6 @@ start_process (void *f_name)
   /* Haney: From here, the value of arguments will be copied on stack      */
   if_.esp -= sizeof(char) * size;
   memcpy (if_.esp, file_name, size );
-  ASSERT( success == 1);
   if_.esp -= sizeof(char) * (size % 4) + sizeof(char *);
   // Amount of decrement in esp should include
   // len of arguments variable (:which named 'file_name') and word-align
