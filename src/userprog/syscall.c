@@ -243,6 +243,10 @@ syscall_exit (int status)
     child_process = list_entry(e, struct child, elem);
     if (child_process->tid == curr->tid){
       child_process->exit_stat = status;
+
+      char* save_ptr;
+      strtok_r (&curr->name," ", &save_ptr);
+
       printf("%s: exit(%d)\n", curr->name, status);
       sema_up(curr->process_sema);
       thread_exit();

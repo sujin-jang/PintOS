@@ -46,7 +46,7 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
   char *save_ptr;
-  strtok_r (file_name," ", &save_ptr);
+  strtok_r (&file_name," ", &save_ptr);
 
   sema_addr = &child_info->sema;
   sema_init (&child_info->sema, 0);
