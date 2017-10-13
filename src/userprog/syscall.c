@@ -248,10 +248,10 @@ syscall_exit (int status)
       strtok_r (&curr->name," ", &save_ptr);
 
       printf("%s: exit(%d)\n", curr->name, status);
+      // TODO: Close all fd in fd list
       sema_up(curr->process_sema);
       thread_exit();
-
-      // TODO: Close all fd in fd list
+      NOT_REACHED();
     }
   }
   NOT_REACHED();

@@ -4,7 +4,7 @@
 #include <round.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+include <string.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
@@ -34,34 +34,36 @@ process_execute (const char *file_name)
   struct child *child_info;
   char *fn_copy;
   tid_t tid;
-  child_info = palloc_get_page(0);
-  if (child_info == NULL)
-    return TID_ERROR;
 
+  child_info = palloc_get_page(0);
+  if (child_info == NULL){
+    return TID_ERROR;
+  }
+  
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
-  char *save_ptr;
-  strtok_r (&file_name," ", &save_ptr);
 
   sema_addr = &child_info->sema;
   load_flag = &child_info->load;
   sema_init (&child_info->sema, 0);
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy);
+  if (tid == TID_ERROR){
+    palloc_free_page (child_info);
+    return TID_ERROR;
+  }
   child_info->tid = tid;
   list_push_back(&curr->child, &child_info->elem);
   sema_down (&child_info->sema);
   if(!child_info->load){
-   tid = -1;
+    tid = -1;
   }  // Check load succesfull
-  //printf("tid = %d\n",tid);
   sema_up(&child_info->sema);
+  thread_yield();
   return tid;
 }
 
@@ -80,8 +82,12 @@ start_process (void *f_name)
   int argc=0; // It counts number of parsed argument
   char **argv; // It holds parsed argument
   argv = palloc_get_page (0);
-  if (argv == NULL){}
-    // haney: I don't have any idea to handle this error
+  if (argv == NULL){
+    *(thread_current()->process_load) = false;
+    palloc_free_page (file_name);
+    sema_up(thread_current()->process_sema);
+    thread_exit ();
+  }
   char *token, *save_ptr;
   for (token = strtok_r (file_name, " ", &save_ptr);
       token != NULL; token = strtok_r (NULL, " ",&save_ptr)){
@@ -135,6 +141,7 @@ start_process (void *f_name)
   palloc_free_page (file_name);
   palloc_free_page (argv);
   sema_up(thread_current()->process_sema);
+  thread_yield();
   /* ----------------------------------------------------------------- */
   sema_down(thread_current()->process_sema);
   /* Start the user process by simulating a return from an
@@ -187,11 +194,18 @@ process_exit (void)
 {
   struct thread *curr = thread_current ();
   uint32_t *pd;
- 
+
+  // Free out all my child list
+  struct child *c;
+  while (!list_empty (&curr->child)){
+    struct list_elem *e = list_pop_front (&curr->child);
+    c = list_entry(e, struct child, elem);
+    palloc_free_page(c);
+  }
 
   struct file *file = curr->executable;
-  //if (file != NULL)
-    //file_allow_write (file); 
+  if (file != NULL)
+    file_allow_write (file); 
   
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -410,7 +424,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  //file_close (file);
   return success;
 }
 
