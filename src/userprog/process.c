@@ -205,7 +205,10 @@ process_exit (void)
 
   struct file *file = curr->executable;
   if (file != NULL)
-    file_allow_write (file); 
+  {
+    //file_allow_write (file); 
+    file_close (file);
+  }
   
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -424,7 +427,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  //file_close (file);
+  if (!success)
+    file_close (file);
   return success;
 }
 

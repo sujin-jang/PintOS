@@ -224,6 +224,29 @@ fd_to_file_descriptor (int fd)
   return NULL;
 }
 
+static void
+process_remove_fdlist (struct thread* t)
+{
+  //printf("enter remove fdlist\n");
+  struct list_elem *iter;
+  struct file_descriptor *desc;
+
+  if(list_empty(&t->fd_list))
+    return;
+
+  //printf("before for loop\n");
+  for (iter = list_begin (&t->fd_list); iter != list_end (&t->fd_list); iter = list_next (iter))
+  {
+    desc = list_entry(iter, struct file_descriptor, elem);
+    //printf("fd: %d\n", desc->fd);
+
+    file_close (desc->file);
+    list_remove (&desc->elem);
+    //free(desc);
+  }
+  //printf("after for loop\n");
+}
+
 /************************************************************
 *              system call helper function.                 *
 *************************************************************/
@@ -243,6 +266,8 @@ syscall_exit (int status)
     child_process = list_entry(e, struct child, elem);
     if (child_process->tid == curr->tid){
       child_process->exit_stat = status;
+
+      process_remove_fdlist(curr);
 
       char* save_ptr;
       strtok_r (&curr->name," ", &save_ptr);
