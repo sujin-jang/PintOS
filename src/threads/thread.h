@@ -103,6 +103,7 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
     struct thread* parent;      /* thread pointer of parent process */
     struct semaphore* process_sema;  /* Lock for implement process wait */
+    bool *process_load;
 
     int fd;
     struct list fd_list;

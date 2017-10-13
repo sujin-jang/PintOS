@@ -13,7 +13,6 @@
 #include "filesys/filesys.h"
 #include "threads/flags.h"
 #include "threads/init.h"
-//#include "threads/synch.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
 #include "threads/thread.h"
@@ -23,7 +22,7 @@ static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
 struct semaphore *sema_addr;
-bool load_flag;
+bool *load_flag;
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -49,6 +48,7 @@ process_execute (const char *file_name)
   strtok_r (&file_name," ", &save_ptr);
 
   sema_addr = &child_info->sema;
+  load_flag = &child_info->load;
   sema_init (&child_info->sema, 0);
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
@@ -57,9 +57,10 @@ process_execute (const char *file_name)
   child_info->tid = tid;
   list_push_back(&curr->child, &child_info->elem);
   sema_down (&child_info->sema);
-  if(!load_flag){
+  if(!child_info->load){
    tid = -1;
   }  // Check load succesfull
+  printf("tid = %d\n",tid);
   sema_up(&child_info->sema);
   return tid;
 }
@@ -70,6 +71,7 @@ static void
 start_process (void *f_name)
 {
   thread_current()->process_sema = sema_addr;
+  thread_current()->process_load = load_flag;
   char *file_name = f_name;
   struct intr_frame if_;
   bool success;
@@ -95,7 +97,7 @@ start_process (void *f_name)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
-  load_flag = success;
+  *(thread_current()->process_load) = success;
   /* If load failed, quit. */ 
   if (!success){
     palloc_free_page (file_name);

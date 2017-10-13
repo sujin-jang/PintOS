@@ -7,6 +7,7 @@
 struct child{
   tid_t tid;
   int exit_stat;
+  bool load;
   struct semaphore sema;
   struct list_elem elem;
 };
