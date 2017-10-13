@@ -8,6 +8,8 @@
 #include "threads/init.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/palloc.h"
+#include "threads/malloc.h"
 
 #include "filesys/filesys.h"
 #include "filesys/file.h"
@@ -37,14 +39,13 @@ static int file_add_fdlist (struct file* file);
 static void file_remove_fdlist (int fd);
 static struct file_descriptor * fd_to_file_descriptor (int fd);
 
-struct lock *lock_file;
+struct lock lock_file;
 
 void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
-  lock_file = malloc(sizeof *lock_file); //TODO: free
-  lock_init (lock_file);
+  lock_init (&lock_file);
 }
 
 static void
@@ -205,7 +206,7 @@ file_remove_fdlist (int fd)
 
   file_close (desc->file);
   list_remove (&desc->elem);
-  free(desc);
+  free (desc);
 }
 
 static struct file_descriptor *
@@ -227,24 +228,24 @@ fd_to_file_descriptor (int fd)
 static void
 process_remove_fdlist (struct thread* t)
 {
-  //printf("enter remove fdlist\n");
-  struct list_elem *iter;
+  struct list_elem *iter, *iter_2;
   struct file_descriptor *desc;
 
   if(list_empty(&t->fd_list))
     return;
 
-  //printf("before for loop\n");
-  for (iter = list_begin (&t->fd_list); iter != list_end (&t->fd_list); iter = list_next (iter))
+  while((iter = list_begin (&t->fd_list)) != list_end (&t->fd_list))
   {
+    iter_2 = list_next (iter);
+
     desc = list_entry(iter, struct file_descriptor, elem);
-    //printf("fd: %d\n", desc->fd);
 
     file_close (desc->file);
     list_remove (&desc->elem);
-    //free(desc);
+    free(desc);
+
+    iter = iter_2;
   }
-  //printf("after for loop\n");
 }
 
 /************************************************************
@@ -273,7 +274,6 @@ syscall_exit (int status)
       strtok_r (&curr->name," ", &save_ptr);
 
       printf("%s: exit(%d)\n", curr->name, status);
-      // TODO: Close all fd in fd list
       sema_up(curr->process_sema);
       thread_exit();
       NOT_REACHED();
@@ -291,23 +291,23 @@ syscall_create (char *file, off_t initial_size)
 static int
 syscall_open (char *file)
 {
-  lock_acquire(lock_file);
+  lock_acquire(&lock_file);
   struct file* opened_file = filesys_open (file);
 
   if (opened_file == NULL)
     return -1;
 
   int result = file_add_fdlist(opened_file);
-  lock_release(lock_file);
+  lock_release(&lock_file);
   return result;
 }
 
 static void
 syscall_close (int fd)
 {
-  lock_acquire(lock_file);
+  lock_acquire(&lock_file);
   file_remove_fdlist (fd);
-  lock_release(lock_file);
+  lock_release(&lock_file);
 }
 
 static int
@@ -316,30 +316,30 @@ syscall_read (int fd, void *buffer, unsigned length)
   if (fd == 0) /* STDIN */
     return input_getc();
 
-  lock_acquire(lock_file);
+  lock_acquire(&lock_file);
 
   struct file_descriptor *desc = fd_to_file_descriptor(fd);
 
   if (desc == NULL)
   {
-    lock_release(lock_file);
+    lock_release(&lock_file);
     return -1;
   }
 
   int result = file_read (desc->file, buffer, length);
 
-  lock_release(lock_file);
+  lock_release(&lock_file);
   return result;
 }
 
 static int
 syscall_filesize (int fd)
 {
-  lock_acquire(lock_file);
+  lock_acquire(&lock_file);
   struct file_descriptor *desc = fd_to_file_descriptor(fd);
   int result = file_length(desc->file);
 
-  lock_release(lock_file);
+  lock_release(&lock_file);
   return result;
 }
 
@@ -353,28 +353,28 @@ syscall_write (int fd, void *buffer, unsigned size)
     return size;
   }
 
-  lock_acquire(lock_file);
+  lock_acquire(&lock_file);
 
   struct file_descriptor *desc = fd_to_file_descriptor(fd);
 
   if (desc == NULL)
   {
-    lock_release(lock_file);
+    lock_release(&lock_file);
     return -1;
   }
 
   int result = file_write (desc->file, buffer, size);
 
-  lock_release(lock_file);
+  lock_release(&lock_file);
   return result;
 }
 
 static bool
 syscall_remove (const char *file)
 {
-  lock_acquire(lock_file);
+  lock_acquire(&lock_file);
   bool result = filesys_remove (file);
-  lock_release(lock_file);
+  lock_release(&lock_file);
 
   return result;
 }
@@ -382,41 +382,34 @@ syscall_remove (const char *file)
 static void
 syscall_seek (int fd, unsigned position)
 {
-  lock_acquire(lock_file);
+  lock_acquire(&lock_file);
 
   struct file_descriptor *desc = fd_to_file_descriptor(fd);
 
   if (desc == NULL)
   {
-    lock_release(lock_file);
+    lock_release(&lock_file);
   }
 
   file_seek (desc->file, position);
-  lock_release(lock_file);
+  lock_release(&lock_file);
 }
 
 static unsigned
 syscall_tell (int fd)
 {
-  lock_acquire(lock_file);
+  lock_acquire(&lock_file);
 
   struct file_descriptor *desc = fd_to_file_descriptor(fd);
 
   if (desc == NULL)
   {
-    lock_release(lock_file);
+    lock_release(&lock_file);
     return 0; //todo: error handling right?
   }
 
   unsigned result = file_tell (desc->file);
-  lock_release(lock_file);
+  lock_release(&lock_file);
 
   return result;
 }
-
-
-/* TODO:
-  file system lock
-  Make.tests Line 17: TIMEOUT = 60
-  /userprog/no-vm/Make.tests : TIMEOUT = 360
-  */
