@@ -60,7 +60,7 @@ process_execute (const char *file_name)
   if(!child_info->load){
    tid = -1;
   }  // Check load succesfull
-  printf("tid = %d\n",tid);
+  //printf("tid = %d\n",tid);
   sema_up(&child_info->sema);
   return tid;
 }
@@ -187,10 +187,11 @@ process_exit (void)
 {
   struct thread *curr = thread_current ();
   uint32_t *pd;
+ 
 
   struct file *file = curr->executable;
-  if (file != NULL)
-    file_allow_write (file); 
+  //if (file != NULL)
+    //file_allow_write (file); 
   
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -409,7 +410,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  //file_close (file);
+  file_close (file);
   return success;
 }
 
