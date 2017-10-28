@@ -88,7 +88,7 @@ priority_greater (const struct list_elem *a_, const struct list_elem *b_,
 void thread_sort_ready_list (void) {
 
   if (!list_empty (&ready_list)){
-    list_sort (&ready_list, priority_greater, NULL);
+    //list_sort (&ready_list, priority_greater, NULL);
     thread_yield();
   }
 }

@@ -184,7 +184,7 @@ static int
 file_add_fdlist (struct file* file)
 {
   struct thread *curr = thread_current ();
-  struct file_descriptor *desc = malloc(sizeof *desc);
+  struct file_descriptor *desc = malloc(sizeof (*desc));
 
   curr->fd++;
 
@@ -242,7 +242,7 @@ process_remove_fdlist (struct thread* t)
 
     file_close (desc->file);
     list_remove (&desc->elem);
-    free(desc);
+    free (desc);
 
     iter = iter_2;
   }

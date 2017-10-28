@@ -35,7 +35,7 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
-  child_info = palloc_get_page(0);
+  child_info = palloc_get_page(PAL_USER);
   if (child_info == NULL){
     return TID_ERROR;
   }
@@ -81,7 +81,7 @@ start_process (void *f_name)
   int size = strlen(file_name) + 1;
   int argc=0; // It counts number of parsed argument
   char **argv; // It holds parsed argument
-  argv = palloc_get_page (0);
+  argv = palloc_get_page (PAL_USER);
   if (argv == NULL){
     *(thread_current()->process_load) = false;
     palloc_free_page (file_name);
@@ -510,8 +510,12 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
       /* Get a page of memory. */
       uint8_t *kpage = palloc_get_page (PAL_USER);
+
+      /* Choose a page to evict when no frames are free (by eviction policy) */
       if (kpage == NULL)
+      {
         return false;
+      }
 
       /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
