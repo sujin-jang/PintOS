@@ -4,6 +4,10 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/palloc.h"
+#include "threads/vaddr.h"
+
+#include "vm/page.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -155,6 +159,42 @@ page_fault (struct intr_frame *f)
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
+
+  #ifdef VM
+    //printf("page fault\n");
+
+    /* stack growth */
+    // TODO: You will need to arrange another way, such as saving esp into struct thread on the initial transition from user to kernel mode.
+
+    //printf("%x\n", (unsigned)(f->esp));
+    //printf("%x\n", (unsigned)fault_addr);
+
+    bool stack_growth_cond = false;
+    stack_growth_cond = (unsigned)(f->esp) - (unsigned)fault_addr == 4 || (unsigned)(f->esp)- (unsigned)fault_addr == 32;
+
+    if(stack_growth_cond)
+    {
+      //printf("stack growth\n");
+
+      struct thread *t = thread_current (); // current thread ..?
+      uint8_t *kpage, *upage;
+      
+      kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+      if (kpage != NULL) 
+      {
+        // page address of fault address
+
+        upage = (unsigned)fault_addr & (~PGMASK);
+
+        if (pagedir_get_page (t->pagedir, upage) == NULL
+          && pagedir_set_page (t->pagedir, upage, kpage, true))
+          return;
+        else
+          palloc_free_page (kpage);
+      }
+    }
+
+  #endif
 
   #ifdef USERPROG
     syscall_exit(-1);
