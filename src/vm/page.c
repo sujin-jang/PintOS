@@ -137,20 +137,20 @@ static bool install_page (void *upage, void *kpage, bool writable);
 void
 page_stack_growth (void *fault_addr, void **esp)
 {
-	uint8_t *kpage;
-	bool success = false;
+  uint8_t *kpage;
+  bool success = false;
 
-	kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
 
-  	if (kpage != NULL) 
+    if (kpage != NULL) 
     {
-    	success = install_page ((uint8_t *) fault_addr, kpage, true);
-    	if (success)
-        	*esp = fault_addr;
-      	else
-        	palloc_free_page (kpage);
+      success = install_page ((uint8_t *) fault_addr, kpage, true);
+      if (success)
+          *esp = fault_addr;
+        else
+          palloc_free_page (kpage);
     }
-	return;
+  return;
 }
 
 static bool

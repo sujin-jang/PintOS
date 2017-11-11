@@ -6,8 +6,8 @@
 #include "threads/thread.h"
 #include "threads/palloc.h"
 #include "threads/vaddr.h"
-
 #include "vm/page.h"
+#include "vm/frame.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -17,17 +17,14 @@ static void page_fault (struct intr_frame *);
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
-
    In a real Unix-like OS, most of these interrupts would be
    passed along to the user process in the form of signals, as
    described in [SV-386] 3-24 and 3-25, but we don't implement
    signals.  Instead, we'll make them simply kill the user
    process.
-
    Page faults are an exception.  Here they are treated the same
    way as other exceptions, but this will need to change to
    implement virtual memory.
-
    Refer to [IA32-v3a] section 5.15 "Exception and Interrupt
    Reference" for a description of each of these exceptions. */
 void
@@ -115,7 +112,6 @@ kill (struct intr_frame *f)
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
    also require modifying this code.
-
    At entry, the address that faulted is in CR2 (Control Register
    2) and information about the fault, formatted as described in
    the PF_* macros in exception.h, is in F's error_code member.  The
@@ -160,7 +156,17 @@ page_fault (struct intr_frame *f)
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
 
+  /*
+  #ifdef USERPROG
+    syscall_exit(-1);
+  #endif
+  */
+
   #ifdef VM
+
+    if (!not_present) /* writing r/o page */
+      syscall_exit(-1);
+
     //printf("page fault\n");
 
     /* stack growth */
@@ -169,35 +175,56 @@ page_fault (struct intr_frame *f)
     //printf("%x\n", (unsigned)(f->esp));
     //printf("%x\n", (unsigned)fault_addr);
 
+    uint8_t *kpage;
+    uint8_t *upage = (unsigned)fault_addr & (~PGMASK);
+    struct thread *t = thread_current ();
+    
     bool stack_growth_cond = false;
-    stack_growth_cond = (unsigned)(f->esp) - (unsigned)fault_addr == 4 || (unsigned)(f->esp)- (unsigned)fault_addr == 32;
+    stack_growth_cond = ((f->esp) - fault_addr == 4 || (f->esp)- fault_addr == 32 || f->esp <= fault_addr) && write;
 
     if(stack_growth_cond)
     {
-      //printf("stack growth\n");
-
-      struct thread *t = thread_current (); // current thread ..?
-      uint8_t *kpage, *upage;
-      
-      kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+      kpage = palloc_get_page_with_frame (PAL_USER | PAL_ZERO, upage, true);
       if (kpage != NULL) 
       {
-        // page address of fault address
-
-        upage = (unsigned)fault_addr & (~PGMASK);
-
-        if (pagedir_get_page (t->pagedir, upage) == NULL
-          && pagedir_set_page (t->pagedir, upage, kpage, true))
+        if (pagedir_get_page (t->pagedir, upage) == NULL && pagedir_set_page (t->pagedir, upage, kpage, true))
           return;
         else
-          palloc_free_page (kpage);
+          palloc_free_page_with_frame (kpage);
       }
     }
 
-  #endif
+    enum page_status status = page_status (upage, t);
 
-  #ifdef USERPROG
+    switch (status) {
+      case PAGE_FRAME :
+        //printf("status: page frame\n");
+        break;
+      case PAGE_FILE :
+        //printf("status: page file\n");
+        break;
+      case PAGE_SWAP : /* swap in */
+        //printf("status: page swap\n");
+        /*
+        if (swap_in_table (upage_temp, t) != true)
+        {
+          //printf("false\n");
+        }
+        swap_free (upage, t);
+        palloc_get_page_with_frame (PAL_USER, upage);
+        */
+        break;
+      case PAGE_ERROR : /* page allocate */
+        //printf("status: page error\n");
+        syscall_exit(-1);
+        break;
+
+      default : break;
+    }
+
+
     syscall_exit(-1);
+
   #endif
   
   printf ("Page fault at %p: %s error %s page in %s context.\n",
@@ -207,4 +234,3 @@ page_fault (struct intr_frame *f)
           user ? "user" : "kernel");
   kill (f);
 }
-

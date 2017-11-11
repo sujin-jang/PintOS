@@ -8,9 +8,9 @@
 /* Where is page */
 enum page_status
   {
-    PAGE_FRAME,		
-    PAGE_FILE,		/* in the file system */
-    PAGE_SWAP,		/* in a swap slot */
+    PAGE_FRAME,   
+    PAGE_FILE,    /* in the file system */
+    PAGE_SWAP,    /* in a swap slot */
     PAGE_ERROR
   };
 

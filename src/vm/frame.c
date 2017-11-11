@@ -14,11 +14,11 @@ static struct frame * frame_find (uint8_t *kpage);
 
 struct frame
 {
-	uint8_t *kpage; /* physical address: frame */
-	uint8_t *upage; /* logical address: page */
-	struct thread *thread;
+  uint8_t *kpage; /* physical address: frame */
+  uint8_t *upage; /* logical address: page */
+  struct thread *thread;
 
-	struct list_elem elem;
+  struct list_elem elem;
 };
 
 void
