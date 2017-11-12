@@ -163,12 +163,11 @@ page_fault (struct intr_frame *f)
   */
 
   #ifdef VM
-    /*
-    printf("page fault\n");
+    
+    //printf("page fault\n");
 
-    printf("%x\n", (unsigned)(f->esp));
-    printf("%x\n", (unsigned)fault_addr);
-    */
+    //printf("%x\n", (unsigned)(f->esp));
+    //printf("%x\n", (unsigned)fault_addr);
 
     if (is_kernel_vaddr(fault_addr))
     {
@@ -195,6 +194,24 @@ page_fault (struct intr_frame *f)
         syscall_exit(-1);
       return;
     }
+
+    /*
+
+    if (write)
+    {
+      printf("write\n");
+      struct page *p = page_find(upage, t);
+      if (p != NULL) {
+        printf("not null\n");
+        if (p->writable == false)
+        {
+          printf("not writable\n");
+        } else {
+          printf("writable\n");
+        }
+      }
+    }
+    */
 
     /* load page from SWAP or FILE */
     enum page_status status = page_status (upage, t);

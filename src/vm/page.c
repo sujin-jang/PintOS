@@ -172,8 +172,8 @@ page_load_file (uint8_t *upage)
   struct thread *t = thread_current();
   struct page *p = page_find (upage, t);
   
-  uint8_t *kpage = palloc_get_page_with_frame (PAL_USER, upage, true); //TODO: writable = page의 writable상태로
-  pagedir_set_page (t->pagedir, upage, kpage, true);
+  uint8_t *kpage = palloc_get_page_with_frame (PAL_USER, upage, p->writable); //TODO: writable = page의 writable상태로
+  pagedir_set_page (t->pagedir, upage, kpage, p->writable);
 
   struct load_info *info = p->load_info;
 
