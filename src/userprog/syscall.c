@@ -166,28 +166,53 @@ static void
 is_valid_ptr(struct intr_frame *f UNUSED, void *uaddr, unsigned size, bool write)
 {
   if (is_kernel_vaddr(uaddr))
-  {
-    //printf("exit 2\n");
     syscall_exit(EXIT_STATUS_1);
-  }
 
-  struct thread* curr = thread_current ();
-  uint32_t *pd = curr->pagedir;
-  uint32_t *is_bad_ptr = pagedir_get_page (pd, uaddr);
-  
-  if(is_bad_ptr == NULL)
+  struct thread* t = thread_current ();
+  uint32_t *pd = t->pagedir;
+
+  /* load is needed */
+  // TODO: size만큼 iteration 돌려야될듯?
+  if( pagedir_get_page(pd, uaddr) == NULL )
   {
-    void *uaddr_page = pg_round_down (uaddr);
-    struct page *p = page_find ((uint8_t *)uaddr_page, thread_current());
+    struct page *upage = pg_round_down(uaddr);
+    //printf("upage: %x\n", upage);
+    uint8_t *kpage;
 
-    if (p!=NULL)
+    if (page_find (upage, t) != NULL)
     {
-      // do something
+      enum page_status status = page_status (upage, t);
+
+      switch (status) {
+      case PAGE_FRAME :
+        //printf("status: page frame\n");
+        return; break;
+      case PAGE_FILE :
+        //printf("status: page file\n");
+        page_load_file (upage);
+        return; break;
+      case PAGE_SWAP : /* swap in */
+        //printf("status: page swap\n");
+
+        kpage = palloc_get_page_with_frame (PAL_USER, upage, true); //TODO: writable = page의 writable상태로
+        pagedir_set_page (t->pagedir, upage, kpage, true);
+        swap_in (upage, kpage, t);
+        return; break;
+      case PAGE_ERROR : /* page allocate */
+        //printf("status: page error\n");
+        syscall_exit(-1); break;
+
+      default : break;
+      }
+    
+      syscall_exit(-1);
     }
 
+    /* stack growth */
     if (write)
     {
       void *position = uaddr;
+      
       while (pg_round_down(position) <= pg_round_down(uaddr + size))
       {
         if (stack_growth (f, position, thread_current()) == false)
@@ -198,7 +223,6 @@ is_valid_ptr(struct intr_frame *f UNUSED, void *uaddr, unsigned size, bool write
       }
       return; 
     }
-    //printf("exit 4\n");
     syscall_exit(EXIT_STATUS_1);
   }
 

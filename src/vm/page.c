@@ -84,7 +84,10 @@ page_status (uint8_t *upage, struct thread *t)
   lock_release (&page_lock);
 
   if (p == NULL)
+  {
+    // printf("null\n");
     return PAGE_ERROR;
+  }
 
   return p->status;
 }
@@ -120,11 +123,12 @@ stack_growth (struct intr_frame *f UNUSED, uint8_t *upage, struct thread *t) // 
         && pagedir_set_page (t->pagedir, upage_down, kpage, true))
         return true;
       else
+      {
         palloc_free_page_with_frame (kpage);
+        return false;
+      }
     }
   }
-
-  return false;
 }
 
 bool

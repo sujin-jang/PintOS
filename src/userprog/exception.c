@@ -181,7 +181,7 @@ page_fault (struct intr_frame *f)
       syscall_exit(-1);
     }
 
-    uint8_t *upage = (unsigned)fault_addr & (~PGMASK);
+    uint8_t *upage = pg_round_down (fault_addr);
     uint8_t *kpage;
     struct thread *t = thread_current ();
     
@@ -201,21 +201,18 @@ page_fault (struct intr_frame *f)
     switch (status) {
       case PAGE_FRAME :
         //printf("status: page frame\n");
-        return;
-        break;
+        return; break;
       case PAGE_FILE :
         //printf("status: page file\n");
         page_load_file (upage);
-        return;
-        break;
+        return; break;
       case PAGE_SWAP : /* swap in */
         //printf("status: page swap\n");
 
         kpage = palloc_get_page_with_frame (PAL_USER, upage, true); //TODO: writable = page의 writable상태로
         pagedir_set_page (t->pagedir, upage, kpage, true);
         swap_in (upage, kpage, t);
-        return;
-        break;
+        return; break;
       case PAGE_ERROR : /* page allocate */
         //printf("status: page error %x\n", upage);
         /*
@@ -223,13 +220,10 @@ page_fault (struct intr_frame *f)
         pagedir_set_page (t->pagedir, upage, kpage, true);
         return;
         */
-        syscall_exit(-1);
-        break;
+        syscall_exit(-1); break;
 
       default : break;
     }
-
-
     syscall_exit(-1);
 
   #endif
