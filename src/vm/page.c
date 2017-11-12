@@ -29,12 +29,12 @@ page_init (void)
 void
 page_insert (uint8_t *upage, struct thread *t, bool writable)
 {
-  lock_acquire (&page_lock);
   struct page *p = malloc (sizeof *p);
   p->upage = upage;
   p->thread = t;
   p->writable = writable;
 
+  lock_acquire (&page_lock);
   list_push_back (&page_list, &p->elem);
   lock_release (&page_lock);
   return;
@@ -43,23 +43,22 @@ page_insert (uint8_t *upage, struct thread *t, bool writable)
 void
 page_remove (uint8_t *upage, struct thread *t)
 {
-  lock_acquire (&page_lock);
-
   struct page *p = page_find(upage, t);
   if (p != NULL)
+  {
+    lock_acquire (&page_lock);
     list_remove (&p->elem);
-
-  lock_release (&page_lock);
+    lock_release (&page_lock);
+  }
   return;
 }
 
 struct page *
 page_find (uint8_t *upage, struct thread *t)
 {
-  lock_acquire (&page_lock_2);
-
   struct list_elem *e;
 
+  lock_acquire (&page_lock_2);
   for (e = list_begin (&page_list); e != list_end (&page_list); e = list_next (e))
   {
     struct page *p = list_entry (e, struct page, elem);
@@ -77,14 +76,11 @@ page_find (uint8_t *upage, struct thread *t)
 enum page_status
 page_status (uint8_t *upage, struct thread *t)
 {
-  lock_acquire (&page_lock);
   uint8_t *upage_down = pg_round_down (upage);
   struct page *p = page_find (upage_down, t);
-  lock_release (&page_lock);
 
   if (p == NULL)
   {
-    // printf("null\n");
     return PAGE_ERROR;
   }
 
@@ -173,10 +169,7 @@ bool
 page_load_file (uint8_t *upage)
 {
   struct thread *t = thread_current();
-
-  lock_acquire (&page_lock);
   struct page *p = page_find (upage, t);
-  lock_release (&page_lock);
   
   uint8_t *kpage = palloc_get_page_with_frame (PAL_USER, upage, true); //TODO: writable = page의 writable상태로
   pagedir_set_page (t->pagedir, upage, kpage, true);
