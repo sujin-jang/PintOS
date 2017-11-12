@@ -109,11 +109,13 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = (uint32_t) syscall_read((int)*arg1, *(void **)arg2, (unsigned)*arg3);
       break;
     case SYS_WRITE: //9
+      //printf("write\n");
       is_valid_ptr(f, *(void **)arg2, 0, false);
       if((int)*arg1 == 0) syscall_exit(EXIT_STATUS_1); //STDIN은 exit/ todo: valid ptr 안에 집어넣기
       f->eax = (uint32_t) syscall_write ((int)*arg1, *(void **)arg2, (unsigned)*arg3);
       break;
     case SYS_SEEK:
+      //printf("seek\n");
       syscall_seek ((int)*arg1, (unsigned)*arg2);
       break;
     case SYS_TELL:

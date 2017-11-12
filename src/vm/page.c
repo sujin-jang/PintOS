@@ -33,6 +33,7 @@ page_insert (uint8_t *upage, struct thread *t, bool writable)
   p->upage = upage;
   p->thread = t;
   p->writable = writable;
+  p->pin = false;
 
   lock_acquire (&page_lock);
   list_push_back (&page_list, &p->elem);
@@ -172,7 +173,7 @@ page_load_file (uint8_t *upage)
   struct thread *t = thread_current();
   struct page *p = page_find (upage, t);
   
-  uint8_t *kpage = palloc_get_page_with_frame (PAL_USER, upage, p->writable); //TODO: writable = page의 writable상태로
+  uint8_t *kpage = palloc_get_page_with_frame_modify (PAL_USER, p); //TODO: writable = page의 writable상태로
   pagedir_set_page (t->pagedir, upage, kpage, p->writable);
 
   struct load_info *info = p->load_info;

@@ -1,6 +1,5 @@
 #include "vm/frame.h"
 #include "vm/swap.h"
-#include "vm/page.h"
 
 #include "threads/vaddr.h"
 #include "threads/synch.h"
@@ -54,14 +53,35 @@ frame_insert (uint8_t *kpage, uint8_t *upage, struct thread *t)
 void
 frame_eviction (void)
 {
-  struct list_elem *elem = list_pop_back (&frame_list); //TODO: modify to LRU
+  struct list_elem *e = list_pop_back (&frame_list); //TODO: modify to LRU
+  
+  /*
+  struct list_elem *e;
 
-  struct frame *f = list_entry (elem, struct frame, elem); // frame to
-  palloc_free_page (f->kpage);
-  pagedir_clear_page (thread_current()->pagedir, f->upage); 
+  for (e = list_begin (&frame_list); e != list_end (&frame_list); e = list_next (e))
+  {
+    struct frame *f = list_entry (e, struct frame, elem);
+    struct page *p = page_find(f->upage, f->thread);
+    if (p != NULL)
+    {
+      if (!(p->pin))
+        break;
+    }
+  }
+  */
+  
+  struct frame *f = list_entry (e, struct frame, elem); // frame to
 
   swap_out (f->kpage, f->upage, f->thread);
   page_change_status (f->upage, f->thread, PAGE_SWAP);
+
+  lock_acquire(&frame_lock);
+  list_remove(&f->elem);
+  lock_release(&frame_lock);
+
+  palloc_free_page (f->kpage);
+  pagedir_clear_page (thread_current()->pagedir, f->upage);
+  free(f);
 }
 
 // TODO: tests/Make.tests line 17 TIMEOUT = 10 -> 60
@@ -97,6 +117,38 @@ palloc_get_page_with_frame (enum palloc_flags flags, uint8_t *upage, bool writab
   //printf("palloc get page: %x %x\n", kpage, upage);
   return kpage;
 }
+
+void *
+palloc_get_page_with_frame_modify (enum palloc_flags flags, struct page *page) 
+{
+  //return palloc_get_page (flags);
+
+  //printf("palloc upage: %x\n", upage);
+  uint8_t *kpage;
+  struct thread *t = thread_current();
+
+  if ( (flags & PAL_USER) == 0 || is_kernel_vaddr(page->upage) )
+    return NULL;
+
+  // TODO: try exception으로 예쁘게 적어보렴, lock 걸어놓자, PAL_USER 아닌 경우 거르기 -> PAL_USER | ZERO 이런애들은?
+
+  /* No frames are free, choose a frame to evict */
+  if ((kpage = palloc_get_page (flags)) == NULL)
+  {
+    frame_eviction(); // TODO: 얘를 bool return 시켜서 evict 불가능한 케이스를 알려주자 -> kernel panic
+    kpage = palloc_get_page (flags);
+  }
+
+  /* Free frame exists */
+  if (kpage != NULL){
+    frame_insert(kpage, page->upage, page->thread);
+    // page->status = PAGE_FRAME;
+  }
+
+  //printf("palloc get page: %x %x\n", kpage, upage);
+  return kpage;
+}
+
 
 void
 palloc_free_page_with_frame (uint8_t *kpage)

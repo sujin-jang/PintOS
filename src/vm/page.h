@@ -24,6 +24,8 @@ struct page
   bool writable;
   bool pin;
 
+  size_t disk_index;
+
   bool load; // lazy load
   struct load_info *load_info;
 
