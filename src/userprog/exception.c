@@ -201,6 +201,7 @@ page_fault (struct intr_frame *f)
     switch (status) {
       case PAGE_FRAME :
         //printf("status: page frame\n");
+        syscall_exit(-1);
         return; break;
       case PAGE_FILE :
         //printf("status: page file\n");

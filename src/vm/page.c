@@ -33,7 +33,6 @@ page_insert (uint8_t *upage, struct thread *t, bool writable)
   struct page *p = malloc (sizeof *p);
   p->upage = upage;
   p->thread = t;
-  p->status = PAGE_FRAME;
   p->writable = writable;
 
   list_push_back (&page_list, &p->elem);
@@ -197,7 +196,7 @@ page_load_file (uint8_t *upage)
   lock_release(&lock_file);
   memset (kpage + info->read_bytes, 0, info->zero_bytes);
 
-  p->status = PAGE_FRAME;
+  // p->status = PAGE_FRAME;
   p->pin = false;
   p->load = true;
 

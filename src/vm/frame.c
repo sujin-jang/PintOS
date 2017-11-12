@@ -38,9 +38,9 @@ frame_insert (uint8_t *kpage, uint8_t *upage, struct thread *t)
   f->upage = upage;
   f->thread = t;
 
-  lock_acquire(&frame_lock_2);
+  lock_acquire(&frame_lock);
   list_push_back (&frame_list, &f->elem);
-  lock_release(&frame_lock_2);
+  lock_release(&frame_lock);
   
 }
 
@@ -72,7 +72,6 @@ palloc_get_page_with_frame (enum palloc_flags flags, uint8_t *upage, bool writab
   //return palloc_get_page (flags);
 
   //printf("palloc upage: %x\n", upage);
-  lock_acquire(&frame_lock);
   uint8_t *kpage;
   struct thread *t = thread_current();
 
@@ -96,25 +95,24 @@ palloc_get_page_with_frame (enum palloc_flags flags, uint8_t *upage, bool writab
   }
 
   //printf("palloc get page: %x %x\n", kpage, upage);
-  lock_release(&frame_lock);
   return kpage;
 }
 
 void
 palloc_free_page_with_frame (uint8_t *kpage)
 {
-  lock_acquire(&frame_lock);
-
   /* remove from frame list */
   struct frame *f = frame_find(kpage);
   if (f != NULL)
   {
+    lock_acquire(&frame_lock);
     list_remove (&f->elem);
+    lock_release(&frame_lock);
+    
     page_remove (f->upage, f->thread);
   }
 
   palloc_free_page (kpage);
-  lock_release(&frame_lock);
   return;
 }
 

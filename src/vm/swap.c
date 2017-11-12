@@ -111,7 +111,7 @@ swap_find (uint8_t *upage, struct thread *t)
   for (e = list_begin (&swap_list); e != list_end (&swap_list); e = list_next (e))
   {
     struct swap *s = list_entry (e, struct swap, elem);
-    if (s->upage == upage)
+    if ((s->upage == upage) && (s->thread == thread_current()))
       return s;
   }
 
