@@ -1,8 +1,9 @@
 #include "vm/swap.h"
 #include "threads/malloc.h"
+#include "threads/synch.h"
 
 /* PGSIZE / DISK_SECTOR_SIZE = 8 */
-#define DISK_SECTOR_IN_FRAME 1
+#define DISK_SECTOR_IN_FRAME 8
 #define START_IDX 0
 
 #define SLOT_ALLOCATE true
@@ -12,6 +13,7 @@ static struct swap * swap_find (uint8_t *upage, struct thread *t);
 
 /* Swap Table */
 struct list swap_list;
+struct lock swap_lock;
 
 struct disk *swap_disk;
 
@@ -34,33 +36,35 @@ void
 swap_init (void) 
 {
 	list_init (&swap_list);
+	lock_init (&swap_lock);
 
 	swap_disk = disk_get(1, 1);
-
 	disk_sector_t size = disk_size (swap_disk);
-	swap_slot = bitmap_create (size >> 3);
+	swap_slot = bitmap_create (size / DISK_SECTOR_IN_FRAME);
 }
 
 /* allocate 된 swap slot list
    free 상태의 wsswap list */
 
 void
-swap_allocate (uint8_t *kpage, uint8_t *upage, struct thread *t)
+swap_out (uint8_t *kpage, uint8_t *upage, struct thread *t)
 {
-	size_t idx = bitmap_scan_and_flip (swap_slot, START_IDX, DISK_SECTOR_IN_FRAME, SLOT_FREE);
+	lock_acquire(&swap_lock);
+	size_t idx = bitmap_scan_and_flip (swap_slot, START_IDX, 1, SLOT_FREE);
 
 	if (idx == BITMAP_ERROR) //TODO: error handling
 	{
+		lock_release(&swap_lock);
 		return;
 	}
 	
 	int i;
-	disk_sector_t sector_idx = idx * DISK_SECTOR_IN_FRAME;
+	// disk_sector_t sector_idx = idx * DISK_SECTOR_IN_FRAME;
 
 	for (i = 0; i < DISK_SECTOR_IN_FRAME; i++)
-		disk_write (swap_disk, sector_idx + i, kpage + i * DISK_SECTOR_IN_FRAME);
+		disk_write (swap_disk, idx * DISK_SECTOR_IN_FRAME + i, kpage + i * DISK_SECTOR_SIZE);
 	
-	//printf("%x\n", (unsigned)idx);
+	printf("swap out: %x\n", (unsigned)idx);
 
 	struct swap *s = malloc (sizeof *s);
 	s->index = idx;
@@ -68,37 +72,35 @@ swap_allocate (uint8_t *kpage, uint8_t *upage, struct thread *t)
 	s->thread = t;
 
 	list_push_back (&swap_list, &s->elem);
+	lock_release(&swap_lock);
+	return;
 }
 
 /* free swap-slot: page is read back or the process whose page was swapped is terminated */
 void
-swap_free (uint8_t *upage, struct thread *t)
+swap_in (uint8_t *upage, uint8_t *kpage, struct thread *t)
 {
+	lock_acquire(&swap_lock);
+
 	struct swap *s = swap_find (upage, t);
 	size_t idx = s->index;
+
+	printf("swap in: %x\n", idx);
 
 	if (bitmap_test (swap_slot, idx) == SLOT_ALLOCATE)
 		bitmap_flip (swap_slot, idx);
 
 	int i;
-	disk_sector_t sector_idx = idx * DISK_SECTOR_IN_FRAME;
-
+	//disk_sector_t sector_idx = idx * DISK_SECTOR_IN_FRAME;
 	for (i = 0; i < DISK_SECTOR_IN_FRAME; i++)
-		disk_read (swap_disk, sector_idx + i, upage + i * DISK_SECTOR_IN_FRAME);
+	{
+		disk_read (swap_disk, idx * DISK_SECTOR_IN_FRAME + i, kpage + i * DISK_SECTOR_SIZE);
+	}
 
 	list_remove(&s->elem);
 	free (s);
-}
-
-
-bool
-swap_in_table (uint8_t *upage, struct thread *t)
-{
-	struct swap *s = swap_find (upage, t);
-	if (s == NULL)
-		return false;
-
-	return true;
+	lock_release(&swap_lock);
+	return;
 }
 
 static struct swap *

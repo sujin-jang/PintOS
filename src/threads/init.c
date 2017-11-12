@@ -123,7 +123,7 @@ main (void)
 #ifdef VM
   frame_init ();
   page_init ();
-  //swap_init ();
+  swap_init ();
 #endif
 
 

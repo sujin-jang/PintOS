@@ -164,58 +164,65 @@ page_fault (struct intr_frame *f)
 
   #ifdef VM
 
-    if (!not_present) /* writing r/o page */
-      syscall_exit(-1);
-
     //printf("page fault\n");
-
-    /* stack growth */
-    // TODO: You will need to arrange another way, such as saving esp into struct thread on the initial transition from user to kernel mode.
 
     //printf("%x\n", (unsigned)(f->esp));
     //printf("%x\n", (unsigned)fault_addr);
 
-    uint8_t *kpage;
+    if (is_kernel_vaddr(fault_addr))
+    {
+      //printf("kernel access\n");
+      syscall_exit(-1);
+    }
+
+    if (!not_present) /* writing r/o page */
+    {
+      //printf("invalid access\n");
+      syscall_exit(-1);
+    }
+
     uint8_t *upage = (unsigned)fault_addr & (~PGMASK);
+    uint8_t *kpage;
     struct thread *t = thread_current ();
     
-    bool stack_growth_cond = false;
-    stack_growth_cond = ((f->esp) - fault_addr == 4 || (f->esp)- fault_addr == 32 || f->esp <= fault_addr) && write;
+    /* stack grows when the condition is met */
+    bool stack_growth_cond = ( f->esp == fault_addr + 4 || f->esp == fault_addr + 32 || f->esp <= fault_addr) && write;
 
     if(stack_growth_cond)
     {
-      kpage = palloc_get_page_with_frame (PAL_USER | PAL_ZERO, upage, true);
-      if (kpage != NULL) 
-      {
-        if (pagedir_get_page (t->pagedir, upage) == NULL && pagedir_set_page (t->pagedir, upage, kpage, true))
-          return;
-        else
-          palloc_free_page_with_frame (kpage);
-      }
+      if (page_stack_growth(pg_round_down (upage), t) == false)
+        syscall_exit(-1);
+      return;
     }
 
+    /* load page from SWAP or FILE */
     enum page_status status = page_status (upage, t);
 
     switch (status) {
       case PAGE_FRAME :
         //printf("status: page frame\n");
+        return;
         break;
       case PAGE_FILE :
         //printf("status: page file\n");
+        page_load_file (upage);
+        return;
         break;
       case PAGE_SWAP : /* swap in */
         //printf("status: page swap\n");
-        /*
-        if (swap_in_table (upage_temp, t) != true)
-        {
-          //printf("false\n");
-        }
-        swap_free (upage, t);
-        palloc_get_page_with_frame (PAL_USER, upage);
-        */
+
+        kpage = palloc_get_page_with_frame (PAL_USER, upage, true); //TODO: writable = page의 writable상태로
+        pagedir_set_page (t->pagedir, upage, kpage, true);
+        swap_in (upage, kpage, t);
+        return;
         break;
       case PAGE_ERROR : /* page allocate */
-        //printf("status: page error\n");
+        //printf("status: page error %x\n", upage);
+        /*
+        kpage = palloc_get_page_with_frame (PAL_USER | PAL_ZERO, upage, true);
+        pagedir_set_page (t->pagedir, upage, kpage, true);
+        return;
+        */
         syscall_exit(-1);
         break;
 

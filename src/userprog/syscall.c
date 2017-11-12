@@ -43,8 +43,6 @@ static int file_add_fdlist (struct file* file);
 static void file_remove_fdlist (int fd);
 static struct file_descriptor * fd_to_file_descriptor (int fd);
 
-struct lock lock_file;
-
 void
 syscall_init (void) 
 {
@@ -55,6 +53,7 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
+  //printf("system call\n");
   //struct thread* curr = thread_current();
   int *syscall_nr = (int *)(f->esp);
   int i;
@@ -62,7 +61,9 @@ syscall_handler (struct intr_frame *f UNUSED)
   //Check whether stack pointer exceed PHYS_BASE
   for(i = 0; i < 4; i++){ //Argument of syscall is no more than 3
     if( ( get_user((uint8_t *)syscall_nr + 4 * i ) == -1 )
-        || is_kernel_vaddr ((void *)((uint8_t *)syscall_nr + 4 * i)) ){
+        || is_kernel_vaddr ((void *)((uint8_t *)syscall_nr + 4 * i)) )
+    {
+      //printf("exit 1\n");
       syscall_exit(EXIT_STATUS_1);
     }
   }
@@ -166,6 +167,7 @@ is_valid_ptr(struct intr_frame *f UNUSED, void *uaddr, unsigned size, bool write
 {
   if (is_kernel_vaddr(uaddr))
   {
+    //printf("exit 2\n");
     syscall_exit(EXIT_STATUS_1);
   }
 
@@ -189,11 +191,14 @@ is_valid_ptr(struct intr_frame *f UNUSED, void *uaddr, unsigned size, bool write
       while (pg_round_down(position) <= pg_round_down(uaddr + size))
       {
         if (stack_growth (f, position, thread_current()) == false)
+        {
           syscall_exit(EXIT_STATUS_1);
+        }
         position = position + PGSIZE;
       }
       return; 
     }
+    //printf("exit 4\n");
     syscall_exit(EXIT_STATUS_1);
   }
 

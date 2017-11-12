@@ -56,11 +56,12 @@ frame_eviction (void)
 {
   struct list_elem *elem = list_pop_back (&frame_list); //TODO: modify to LRU
 
-  struct frame *f = list_entry (elem, struct frame, elem);
+  struct frame *f = list_entry (elem, struct frame, elem); // frame to
   palloc_free_page (f->kpage);
+  pagedir_clear_page (thread_current()->pagedir, f->upage); 
 
-  //swap_allocate (f->kpage, f->upage, f->thread);
-  //page_change_status (f->upage, f->thread, PAGE_SWAP);
+  swap_out (f->kpage, f->upage, f->thread);
+  page_change_status (f->upage, f->thread, PAGE_SWAP);
 }
 
 // TODO: tests/Make.tests line 17 TIMEOUT = 10 -> 60
@@ -70,6 +71,7 @@ palloc_get_page_with_frame (enum palloc_flags flags, uint8_t *upage, bool writab
 {
   //return palloc_get_page (flags);
 
+  //printf("palloc upage: %x\n", upage);
   lock_acquire(&frame_lock);
   uint8_t *kpage;
   struct thread *t = thread_current();
@@ -82,7 +84,6 @@ palloc_get_page_with_frame (enum palloc_flags flags, uint8_t *upage, bool writab
   /* No frames are free, choose a frame to evict */
   if ((kpage = palloc_get_page (flags)) == NULL)
   {
-    printf("lets evict\n");
     frame_eviction(); // TODO: 얘를 bool return 시켜서 evict 불가능한 케이스를 알려주자 -> kernel panic
     kpage = palloc_get_page (flags);
   }
@@ -90,7 +91,7 @@ palloc_get_page_with_frame (enum palloc_flags flags, uint8_t *upage, bool writab
   /* Free frame exists */
   if (kpage != NULL){
     frame_insert(kpage, upage, t);
-    //printf("%x\n", kpage);
+    //printf("kpage: %x, upage: %x\n", kpage, upage);
     page_insert (upage, t, writable);
   }
 
@@ -125,7 +126,7 @@ frame_find (uint8_t *kpage)
   for (e = list_begin (&frame_list); e != list_end (&frame_list); e = list_next (e))
   {
     struct frame *f = list_entry (e, struct frame, elem);
-    if (f->kpage == kpage)
+    if ((f->kpage == kpage) && (f->thread == thread_current()))
       return f;
   }
 
