@@ -14,6 +14,8 @@ static struct swap * swap_find (uint8_t *upage, struct thread *t);
 /* Swap Table */
 struct list swap_list;
 struct lock swap_lock;
+struct lock disk_lock;
+struct lock bitmap_lock;
 
 struct disk *swap_disk;
 
@@ -23,7 +25,7 @@ struct bitmap *swap_slot;
 
 struct hash *swap_table;
 
-struct swap
+struct swap //너의 존재이유는 무엇이니
 {
 	uint8_t *upage; /* logical address: page */
 	struct thread *thread;
@@ -37,6 +39,8 @@ swap_init (void)
 {
 	list_init (&swap_list);
 	lock_init (&swap_lock);
+	lock_init (&disk_lock);
+	lock_init (&bitmap_lock);
 
 	swap_disk = disk_get(1, 1);
 	disk_sector_t size = disk_size (swap_disk);
@@ -49,20 +53,22 @@ swap_init (void)
 void
 swap_out (uint8_t *kpage, uint8_t *upage, struct thread *t)
 {
-	lock_acquire(&swap_lock);
+	lock_acquire(&bitmap_lock);
 	size_t idx = bitmap_scan_and_flip (swap_slot, START_IDX, 1, SLOT_FREE);
+	lock_release(&bitmap_lock);
 
 	if (idx == BITMAP_ERROR) //TODO: error handling
 	{
-		lock_release(&swap_lock);
 		return;
 	}
 	
 	int i;
 	// disk_sector_t sector_idx = idx * DISK_SECTOR_IN_FRAME;
 
+	lock_acquire(&disk_lock);
 	for (i = 0; i < DISK_SECTOR_IN_FRAME; i++)
 		disk_write (swap_disk, idx * DISK_SECTOR_IN_FRAME + i, kpage + i * DISK_SECTOR_SIZE);
+	lock_release(&disk_lock);
 	
 	printf("swap out: %x\n", (unsigned)idx);
 
@@ -71,6 +77,7 @@ swap_out (uint8_t *kpage, uint8_t *upage, struct thread *t)
 	s->upage = upage;
 	s->thread = t;
 
+	lock_acquire(&swap_lock);
 	list_push_back (&swap_list, &s->elem);
 	lock_release(&swap_lock);
 	return;
@@ -80,26 +87,28 @@ swap_out (uint8_t *kpage, uint8_t *upage, struct thread *t)
 void
 swap_in (uint8_t *upage, uint8_t *kpage, struct thread *t)
 {
-	lock_acquire(&swap_lock);
-
 	struct swap *s = swap_find (upage, t);
 	size_t idx = s->index;
 
 	printf("swap in: %x\n", idx);
 
+	lock_acquire(&bitmap_lock);
 	if (bitmap_test (swap_slot, idx) == SLOT_ALLOCATE)
 		bitmap_flip (swap_slot, idx);
+	lock_release(&bitmap_lock);
 
 	int i;
 	//disk_sector_t sector_idx = idx * DISK_SECTOR_IN_FRAME;
+	lock_acquire(&disk_lock);
 	for (i = 0; i < DISK_SECTOR_IN_FRAME; i++)
-	{
 		disk_read (swap_disk, idx * DISK_SECTOR_IN_FRAME + i, kpage + i * DISK_SECTOR_SIZE);
-	}
+	lock_release(&disk_lock);
 
+	lock_acquire(&swap_lock);
 	list_remove(&s->elem);
-	free (s);
 	lock_release(&swap_lock);
+
+	free (s);
 	return;
 }
 
@@ -108,13 +117,18 @@ swap_find (uint8_t *upage, struct thread *t)
 {
   struct list_elem *e;
 
+  lock_acquire(&swap_lock);
   for (e = list_begin (&swap_list); e != list_end (&swap_list); e = list_next (e))
   {
     struct swap *s = list_entry (e, struct swap, elem);
     if ((s->upage == upage) && (s->thread == thread_current()))
-      return s;
+    {
+    	lock_release(&swap_lock);
+    	return s;
+    }
   }
-
+  
+  lock_release(&swap_lock);
   return NULL;
 }
 

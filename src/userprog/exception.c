@@ -163,11 +163,12 @@ page_fault (struct intr_frame *f)
   */
 
   #ifdef VM
+    /*
+    printf("page fault\n");
 
-    //printf("page fault\n");
-
-    //printf("%x\n", (unsigned)(f->esp));
-    //printf("%x\n", (unsigned)fault_addr);
+    printf("%x\n", (unsigned)(f->esp));
+    printf("%x\n", (unsigned)fault_addr);
+    */
 
     if (is_kernel_vaddr(fault_addr))
     {
@@ -202,7 +203,6 @@ page_fault (struct intr_frame *f)
       case PAGE_FRAME :
         //printf("status: page frame\n");
         syscall_exit(-1);
-        return; break;
       case PAGE_FILE :
         //printf("status: page file\n");
         page_load_file (upage);

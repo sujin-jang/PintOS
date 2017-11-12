@@ -124,6 +124,7 @@ stack_growth (struct intr_frame *f UNUSED, uint8_t *upage, struct thread *t) // 
       }
     }
   }
+  return false;
 }
 
 bool

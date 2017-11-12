@@ -95,6 +95,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = (uint32_t) syscall_remove (*(char **)arg1);
       break;
     case SYS_OPEN: //6
+      //printf("open\n");
       is_valid_ptr(f, *(void **)arg1, 0, false);
       f->eax = (uint32_t) syscall_open(*(char **)arg1);
       break;
@@ -102,6 +103,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = (uint32_t) syscall_filesize((int)*arg1);
       break;
     case SYS_READ: //8
+      //printf("read\n");
       is_valid_ptr(f, *(void **)arg2, (unsigned)*arg3, true);
       //is_writable(*(void **)arg2);
       f->eax = (uint32_t) syscall_read((int)*arg1, *(void **)arg2, (unsigned)*arg3);
@@ -165,6 +167,7 @@ static int get_user (const uint8_t *uaddr){
 static void
 is_valid_ptr(struct intr_frame *f UNUSED, void *uaddr, unsigned size, bool write)
 {
+  //printf("valid test\n");
   if (is_kernel_vaddr(uaddr))
     syscall_exit(EXIT_STATUS_1);
 
@@ -175,6 +178,7 @@ is_valid_ptr(struct intr_frame *f UNUSED, void *uaddr, unsigned size, bool write
   // TODO: size만큼 iteration 돌려야될듯?
   if( pagedir_get_page(pd, uaddr) == NULL )
   {
+    //printf("pagedir null\n");
     struct page *upage = pg_round_down(uaddr);
     //printf("upage: %x\n", upage);
     uint8_t *kpage;
@@ -186,14 +190,13 @@ is_valid_ptr(struct intr_frame *f UNUSED, void *uaddr, unsigned size, bool write
       switch (status) {
       case PAGE_FRAME :
         //printf("status: page frame\n");
-        return; break;
+        syscall_exit(-1);
       case PAGE_FILE :
         //printf("status: page file\n");
         page_load_file (upage);
         return; break;
       case PAGE_SWAP : /* swap in */
         //printf("status: page swap\n");
-
         kpage = palloc_get_page_with_frame (PAL_USER, upage, true); //TODO: writable = page의 writable상태로
         pagedir_set_page (t->pagedir, upage, kpage, true);
         swap_in (upage, kpage, t);
@@ -204,15 +207,13 @@ is_valid_ptr(struct intr_frame *f UNUSED, void *uaddr, unsigned size, bool write
 
       default : break;
       }
-    
       syscall_exit(-1);
     }
 
     /* stack growth */
     if (write)
     {
-      void *position = uaddr;
-      
+      void *position = uaddr; 
       while (pg_round_down(position) <= pg_round_down(uaddr + size))
       {
         if (stack_growth (f, position, thread_current()) == false)
@@ -221,7 +222,8 @@ is_valid_ptr(struct intr_frame *f UNUSED, void *uaddr, unsigned size, bool write
         }
         position = position + PGSIZE;
       }
-      return; 
+      //printf("return here\n");
+      return;
     }
     syscall_exit(EXIT_STATUS_1);
   }
