@@ -3,7 +3,10 @@
 
 #include <debug.h>
 #include <list.h>
+#include <hash.h>
 #include <stdint.h>
+
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -108,6 +111,9 @@ struct thread
     int fd;
     struct list fd_list;
     struct file* executable;
+
+    struct hash page_table;
+    struct lock page_lock;
 #endif
 
     /* Owned by thread.c. */

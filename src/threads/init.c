@@ -36,8 +36,8 @@
 #endif
 #ifdef VM
 #include "vm/frame.h"
-#include "vm/swap.h"
 #include "vm/page.h"
+#include "vm/swap.h"
 #endif
 
 /* Amount of physical memory, in 4 kB pages. */
@@ -121,11 +121,9 @@ main (void)
 #endif
 
 #ifdef VM
-  frame_init ();
-  page_init ();
-  swap_init ();
+  frame_init();
+  swap_init();
 #endif
-
 
   printf ("Boot complete.\n");
   

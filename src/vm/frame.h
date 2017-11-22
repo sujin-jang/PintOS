@@ -1,18 +1,21 @@
 #ifndef VM_FRAME_H
 #define VM_FRAME_H
 
-#include <list.h>
-#include "threads/thread.h"
 #include "threads/palloc.h"
 #include "vm/page.h"
 
+/* Frame table entry */
+struct frame
+{
+    uint8_t *kpage;
+    struct page *page;
+    struct list_elem elem;
+};
+
 void frame_init (void);
-void frame_insert (uint8_t *kpage, uint8_t *upage, struct thread *t);
-void frame_eviction (void);
+void *frame_alloc (enum palloc_flags flags, void *upage, bool writable);
+void *frame_alloc_with_page (enum palloc_flags flags, struct page *p);
+void frame_free (void *kpage);
+void *frame_evict (void);
 
-void * palloc_get_page_with_frame (enum palloc_flags flags, uint8_t *upage, bool writable);
-void palloc_free_page_with_frame (uint8_t *upage);
-
-void * palloc_get_page_with_frame_modify (enum palloc_flags flags, struct page *page);
-
-#endif /* vm/frame.h */
+#endif

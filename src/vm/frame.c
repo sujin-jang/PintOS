@@ -1,184 +1,158 @@
 #include "vm/frame.h"
-#include "vm/swap.h"
-
-#include "threads/vaddr.h"
 #include "threads/synch.h"
+#include "threads/vaddr.h"
+#include <list.h>
+#include <debug.h>
 
-/* Frame Table */
-struct list frame_list;
+/* Frame table */
+struct list frame_table;
+
+/* Lock to protect frame table */
 struct lock frame_lock;
-struct lock frame_lock_2;
 
-static struct frame * frame_find (uint8_t *kpage);
+struct lock evict_lock;
 
-struct frame
-{
-  uint8_t *kpage; /* physical address: frame */
-  uint8_t *upage; /* logical address: page */
-  struct thread *thread;
+static struct frame * frame_find (void *kpage);
 
-  struct list_elem elem;
-};
-
+/* Initializes the frame table (called in threads/init.c) */
 void
-frame_init (void) 
+frame_init (void)
 {
-  list_init (&frame_list);
-  lock_init (&frame_lock);
-  lock_init (&frame_lock_2);
+  list_init (&frame_table);
+    lock_init (&frame_lock);
+
+    lock_init (&evict_lock);
+    return;
 }
 
-void
-frame_insert (uint8_t *kpage, uint8_t *upage, struct thread *t)
+/* Frame allcoate */
+void *
+frame_alloc (enum palloc_flags flags, void *upage, bool writable)
 {
-  struct frame *f = malloc(sizeof *f);
+  ASSERT(flags & PAL_USER); // if not PAL_USER, ASSERT
+  ASSERT (pg_ofs (upage) == 0);
 
-  f->kpage = kpage;
-  f->upage = upage;
-  f->thread = t;
-
-  lock_acquire(&frame_lock);
-  list_push_back (&frame_list, &f->elem);
-  lock_release(&frame_lock);
-  
-}
-
-/* access 할때마다 list 내에서 순서를 바꿔주면 좋을텐데 */
-/* TODO:
-  eviction 해서는 안되는 애들 표시
-  LRU
-  */
-
-/* No frames are free, choose a frame to evict */
-void
-frame_eviction (void)
-{
-  struct list_elem *e = list_pop_back (&frame_list); //TODO: modify to LRU
-  
   /*
-  struct list_elem *e;
-
-  for (e = list_begin (&frame_list); e != list_end (&frame_list); e = list_next (e))
-  {
-    struct frame *f = list_entry (e, struct frame, elem);
-    struct page *p = page_find(f->upage, f->thread);
-    if (p != NULL)
-    {
-      if (!(p->pin))
-        break;
-    }
-  }
+  1. free frame 존재하면: palloc_get_page -> page_allocate
+  2. free frame 존재하지 않으면: eviction 후 palloc_get_page -> page_allocate
+    3. 성공하면 page install
+  4. frame table에 push
   */
-  
-  struct frame *f = list_entry (e, struct frame, elem); // frame to
 
-  swap_out (f->kpage, f->upage, f->thread);
-  page_change_status (f->upage, f->thread, PAGE_SWAP);
+  lock_acquire(&evict_lock);
+  struct page *p = page_insert (upage, writable, PAGE_FRAME);
+  ASSERT (p != NULL);
 
-  lock_acquire(&frame_lock);
-  list_remove(&f->elem);
-  lock_release(&frame_lock);
+  uint8_t *kpage = palloc_get_page (flags);
 
-  palloc_free_page (f->kpage);
-  pagedir_clear_page (thread_current()->pagedir, f->upage);
-  free(f);
-}
-
-// TODO: tests/Make.tests line 17 TIMEOUT = 10 -> 60
-
-void *
-palloc_get_page_with_frame (enum palloc_flags flags, uint8_t *upage, bool writable) 
-{
-  //return palloc_get_page (flags);
-
-  //printf("palloc upage: %x\n", upage);
-  uint8_t *kpage;
-  struct thread *t = thread_current();
-
-  if ( (flags & PAL_USER) == 0 || is_kernel_vaddr(upage) )
-    return NULL;
-
-  // TODO: try exception으로 예쁘게 적어보렴, lock 걸어놓자, PAL_USER 아닌 경우 거르기 -> PAL_USER | ZERO 이런애들은?
-
-  /* No frames are free, choose a frame to evict */
-  if ((kpage = palloc_get_page (flags)) == NULL)
-  {
-    frame_eviction(); // TODO: 얘를 bool return 시켜서 evict 불가능한 케이스를 알려주자 -> kernel panic
-    kpage = palloc_get_page (flags);
-  }
-
-  /* Free frame exists */
-  if (kpage != NULL){
-    frame_insert(kpage, upage, t);
-    //printf("kpage: %x, upage: %x\n", kpage, upage);
-    page_insert (upage, t, writable);
-  }
-
-  //printf("palloc get page: %x %x\n", kpage, upage);
-  return kpage;
-}
-
-void *
-palloc_get_page_with_frame_modify (enum palloc_flags flags, struct page *page) 
-{
-  //return palloc_get_page (flags);
-
-  //printf("palloc upage: %x\n", upage);
-  uint8_t *kpage;
-  struct thread *t = thread_current();
-
-  if ( (flags & PAL_USER) == 0 || is_kernel_vaddr(page->upage) )
-    return NULL;
-
-  // TODO: try exception으로 예쁘게 적어보렴, lock 걸어놓자, PAL_USER 아닌 경우 거르기 -> PAL_USER | ZERO 이런애들은?
-
-  /* No frames are free, choose a frame to evict */
-  if ((kpage = palloc_get_page (flags)) == NULL)
-  {
-    frame_eviction(); // TODO: 얘를 bool return 시켜서 evict 불가능한 케이스를 알려주자 -> kernel panic
-    kpage = palloc_get_page (flags);
-  }
-
-  /* Free frame exists */
-  if (kpage != NULL){
-    frame_insert(kpage, page->upage, page->thread);
-    // page->status = PAGE_FRAME;
-  }
-
-  //printf("palloc get page: %x %x\n", kpage, upage);
-  return kpage;
-}
-
-
-void
-palloc_free_page_with_frame (uint8_t *kpage)
-{
-  /* remove from frame list */
-  struct frame *f = frame_find(kpage);
-  if (f != NULL)
-  {
-    lock_acquire(&frame_lock);
-    list_remove (&f->elem);
-    lock_release(&frame_lock);
+  if (kpage == NULL)
+    { 
+      /* eviction */
+      frame_evict ();
+      kpage = palloc_get_page (flags); // evict 하고 온 사이에 다른애가 가로채면 어떡해 ?1! TODO: lock
+      //return NULL;
+    }
     
-    page_remove (f->upage, f->thread);
-  }
+    struct frame *f = malloc (sizeof (*f));
+    f->kpage = kpage;
+    f->page = p;
+
+    lock_acquire(&frame_lock);
+    list_push_back (&frame_table, &f->elem);
+    lock_release(&frame_lock);
+
+    lock_release(&evict_lock);
+  return kpage;
+}
+
+/* Frame allcoate */
+void *
+frame_alloc_with_page (enum palloc_flags flags, struct page *p)
+{
+  ASSERT(flags & PAL_USER); // if not PAL_USER, ASSERT
+
+  uint8_t *kpage = palloc_get_page (flags);
+
+  if (kpage == NULL)
+    { 
+      /* eviction */
+      frame_evict ();
+      kpage = palloc_get_page (flags); // evict 하고 온 사이에 다른애가 가로채면 어떡해 ?1! TODO: lock
+      //return NULL;
+    }
+    
+    struct frame *f = malloc (sizeof (*f));
+    f->kpage = kpage;
+    f->page = p;
+
+    lock_acquire(&frame_lock);
+    list_push_back (&frame_table, &f->elem);
+    lock_release(&frame_lock);
+
+  return kpage;
+}
+
+
+/* Frame free */
+void
+frame_free (void *kpage)
+{
+  /*
+  1. find(kapge) != NULL 이면: palloc_free_page
+  2. struct page의 status = not frame으로 변경..?
+  3. frame table에서 pull
+
+  4. find(kpage) == NULL 이면: nothing
+  */
+
+  struct frame *f = frame_find(kpage);
+    if (f != NULL)
+    {
+      lock_acquire(&frame_lock);
+      list_remove (&f->elem);
+      lock_release(&frame_lock);
+    }
 
   palloc_free_page (kpage);
-  return;
+    return;
 }
 
 static struct frame *
-frame_find (uint8_t *kpage)
+frame_find (void *kpage)
 {
+  lock_acquire(&frame_lock);
   struct list_elem *e;
 
-  for (e = list_begin (&frame_list); e != list_end (&frame_list); e = list_next (e))
+  for (e = list_begin (&frame_table); e != list_end (&frame_table); e = list_next (e))
   {
     struct frame *f = list_entry (e, struct frame, elem);
-    if ((f->kpage == kpage) && (f->thread == thread_current()))
+    if (f->kpage == kpage)
+    {
+      lock_release(&frame_lock);
       return f;
-  }
+    }
+    }
 
-  return NULL;
+    lock_release(&frame_lock);
+    return NULL;
 }
+
+/* Choose a frame to evcit if run out of frames */
+void *
+frame_evict (void) // TODO: evict lock
+{
+  /* FIFO */
+
+  struct list_elem *e = list_front (&frame_table);
+  struct frame *f = list_entry (e, struct frame, elem);
+
+  swap_out (f);
+
+  f->page->status = PAGE_SWAP; // TODO: page lock
+  
+  pagedir_clear_page(f->page->thread->pagedir, f->page->upage); // TODO: pagedir lock
+  frame_free (f->kpage);
+
+    return NULL;
+}
+

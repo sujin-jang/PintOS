@@ -1,199 +1,197 @@
 #include "vm/page.h"
-#include "userprog/process.h"
-#include "threads/palloc.h"
-#include "userprog/pagedir.h"
+#include "threads/synch.h"
+#include "threads/thread.h"
 #include "threads/vaddr.h"
-#include <stdio.h>
+#include "threads/palloc.h"
+#include <list.h>
 
-#include "userprog/syscall.h"
+static bool install_page (void *upage, void *kpage, bool writable);
 
-/* Supplemental Page Table
- * 1. page fault: kernel find out what data should be there
- * 2. process terminate: kernel decide what resources to free
- */
-
-struct list page_list;
-struct lock page_lock;
-struct lock page_lock_2;
-struct lock page_lock_sibal;
-
-void
-page_init (void) 
+struct page *
+page_insert (void *upage, bool writable, enum page_status status)
 {
-  list_init (&page_list);
-  lock_init (&page_lock);
-  lock_init (&page_lock_2);
-  lock_init (&page_lock_sibal);
-}
+  ASSERT (pg_ofs (upage) == 0);
 
-void
-page_insert (uint8_t *upage, struct thread *t, bool writable)
-{
-  struct page *p = malloc (sizeof *p);
-  p->upage = upage;
-  p->thread = t;
-  p->writable = writable;
-  p->pin = false;
+  struct thread *t = thread_current();
+  struct page *p = malloc(sizeof *p);
 
-  lock_acquire (&page_lock);
-  list_push_back (&page_list, &p->elem);
-  lock_release (&page_lock);
-  return;
-}
-
-void
-page_remove (uint8_t *upage, struct thread *t)
-{
-  struct page *p = page_find(upage, t);
-  if (p != NULL)
+  switch (status)
   {
-    lock_acquire (&page_lock);
-    list_remove (&p->elem);
-    lock_release (&page_lock);
+    case PAGE_FRAME:
+      p->upage = upage;
+      p->status = PAGE_FRAME;
+      p->writable = writable;
+      p->thread = thread_current();
+
+      lock_acquire (&t->page_lock);
+      hash_insert (&t->page_table, &p->elem);
+      lock_release (&t->page_lock);
+
+      ASSERT (page_find (t->page_table, upage) != NULL); // insert 잘 됐는지 확인 ㅇㅅaㅇ
+
+      return p;
+
+    case PAGE_FILE: /* for lazy loading */
+      break;
+
+    case PAGE_MMAP: /* for 3-2 mmap */
+      break;
+
+    default:
+      break;
   }
+
+  //printf("page insert null\n");
+  return NULL;
+}
+
+void
+page_remove (void *upage)
+{
+  // struct thread *t = thread_current();
+  // hash_delete (&t->page_table, &p->elem);
   return;
 }
 
 struct page *
-page_find (uint8_t *upage, struct thread *t)
+page_find (struct hash page_table, void *upage_input)
 {
-  struct list_elem *e;
+  uint8_t *upage = pg_round_down (upage_input);
+  ASSERT (pg_ofs (upage) == 0);
 
-  lock_acquire (&page_lock_2);
-  for (e = list_begin (&page_list); e != list_end (&page_list); e = list_next (e))
-  {
-    struct page *p = list_entry (e, struct page, elem);
-    //printf("%x\n", p->upage);
-    if ((p->upage == upage) && (p->thread == t))
+  struct page p;
+  struct hash_elem *e;
+
+    p.upage = upage;
+    e = hash_find (&page_table, &p.elem); // TODO: lock?
+
+    if (e == NULL)
     {
-      lock_release(&page_lock_2);
-      return p;
+      return NULL;
     }
-  }
-  lock_release(&page_lock_2);
-  return NULL;
-}
 
-enum page_status
-page_status (uint8_t *upage, struct thread *t)
-{
-  uint8_t *upage_down = pg_round_down (upage);
-  struct page *p = page_find (upage_down, t);
-
-  if (p == NULL)
-  {
-    return PAGE_ERROR;
-  }
-
-  return p->status;
-}
-
-void
-page_change_status (uint8_t *upage, struct thread *t, enum page_status status)
-{
-  struct page *p = page_find (upage, t);
-  if (p == NULL)
-  {
-    // TODO: error handling
-  }
-
-  p->status = status;
+    return hash_entry (e, struct page, elem);
 }
 
 bool
-stack_growth (struct intr_frame *f UNUSED, uint8_t *upage, struct thread *t) // TODO: syscall 수정할ㄸㅐ 아래 스택 그로스랑 합치기
+page_load (struct page *page)
 {
-  bool stack_growth_cond = false;
-  stack_growth_cond = ((unsigned)(f->esp) == upage + 4
-    || (unsigned)(f->esp) == upage + 32
-    || (unsigned)(f->esp) <= upage);
+  enum page_status status = page->status;
+  //printf("enter page load\n");
 
-  uint8_t *upage_down = pg_round_down (upage);
+  uint8_t *kpage;
 
-  if(stack_growth_cond)
+  switch (status)
   {
-    uint8_t *kpage = palloc_get_page_with_frame (PAL_USER | PAL_ZERO, upage_down, true);
-    if (kpage != NULL) 
-    {
-      if (pagedir_get_page (t->pagedir, upage_down) == NULL
-        && pagedir_set_page (t->pagedir, upage_down, kpage, true))
-        return true;
-      else
+    case PAGE_FRAME:
+      break;
+    case PAGE_SWAP:
+      //printf("swap load\n");
+      kpage = frame_alloc_with_page (PAL_USER, page);
+      
+      ASSERT (kpage != NULL);
+
+        bool install = install_page (page->upage, kpage, page->writable);
+
+        ASSERT (install != NULL);
+
+      bool success = swap_in (kpage, page);
+
+      if (!success)
       {
-        palloc_free_page_with_frame (kpage);
         return false;
       }
-    }
+
+      page->status = PAGE_FRAME;
+      return true;
+    default:
+      break;
   }
+
   return false;
 }
 
 bool
-page_stack_growth (uint8_t *upage, struct thread *t)
+page_stack_growth (void *upage_input)
 {
-  uint8_t *kpage = palloc_get_page_with_frame (PAL_USER | PAL_ZERO, upage, true);
-  if (kpage != NULL)
-  {
-    if (pagedir_get_page (t->pagedir, upage) == NULL
-      && pagedir_set_page (t->pagedir, upage, kpage, true))
-        return true;
-      else
-        palloc_free_page_with_frame (kpage);
+  uint8_t *upage = pg_round_down (upage_input);
+  bool success = true;
+
+    uint8_t *kpage = frame_alloc (PAL_USER | PAL_ZERO, upage, true);
+    if (kpage != NULL)
+    {
+      success = install_page (upage, kpage, true);
+      if (!success)
+        frame_free (kpage);
     }
-  return false;
+    return success;
+}
+
+static bool
+install_page (void *upage, void *kpage, bool writable)
+{
+  struct thread *t = thread_current ();
+
+  /* Verify that there's not already a page at that virtual
+     address, then map our page there. */
+  return (pagedir_get_page (t->pagedir, upage) == NULL
+          && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* Hash table help funtions */
+
+static unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
+static bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
+
+static unsigned
+page_hash (const struct hash_elem *p_, void *aux UNUSED)
+{
+  const struct page *p = hash_entry (p_, struct page, elem);
+  return hash_bytes (&p->upage, sizeof p->upage); // TODO: 이거 맞는지 잘 모르겠다 확인 plz
+}
+
+static bool
+page_less (const struct hash_elem *a_, const struct hash_elem *b_,
+                void *aux UNUSED)
+{
+  const struct page *a = hash_entry (a_, struct page, elem);
+  const struct page *b = hash_entry (b_, struct page, elem);
+  return a->upage < b->upage;
 }
 
 void
-page_set_file (struct file *file, uint8_t *upage, off_t ofs, uint32_t page_read_bytes, uint32_t page_zero_bytes, bool writable)
+page_table_create (struct hash *page_table)
 {
-  struct load_info *load_info = malloc(sizeof *load_info); // TODO: free: lazy load할 때
-  load_info -> file = file;
-  load_info -> ofs = ofs;
-  load_info -> read_bytes = page_read_bytes;
-  load_info -> zero_bytes = page_zero_bytes;
-
-  struct page *p = malloc(sizeof *p);
-  p->upage = upage;
-  p->thread = thread_current();
-  p->status = PAGE_FILE;
-
-  p->load_info = load_info;
-  p->pin = true;
-  p->load = false;
-  p->writable = writable;
-
-  lock_acquire (&page_lock);
-  list_push_back (&page_list, &p->elem);
-  lock_release (&page_lock);
+  hash_init (page_table, page_hash, page_less, NULL);
 }
 
-bool
-page_load_file (uint8_t *upage)
+void
+page_table_destroy (struct hash *page_table)
 {
-  struct thread *t = thread_current();
-  struct page *p = page_find (upage, t);
-  
-  uint8_t *kpage = palloc_get_page_with_frame_modify (PAL_USER, p); //TODO: writable = page의 writable상태로
-  pagedir_set_page (t->pagedir, upage, kpage, p->writable);
-
-  struct load_info *info = p->load_info;
-
-  lock_acquire(&lock_file);
-  if (file_read_at (info->file, kpage, info->read_bytes, info->ofs) != (int) info->read_bytes)
-    {
-      lock_release(&lock_file);
-
-      palloc_free_page_with_frame (kpage);
-      pagedir_clear_page (t->pagedir, upage);
-
-      return false;
-    }
-  lock_release(&lock_file);
-  memset (kpage + info->read_bytes, 0, info->zero_bytes);
-
-  // p->status = PAGE_FRAME;
-  p->pin = false;
-  p->load = true;
-
-  return true;
+  // hash_destroy (struct hash *hash, hash action func *action);
+  return;
 }

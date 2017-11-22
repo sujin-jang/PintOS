@@ -17,6 +17,7 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+
 #include "vm/frame.h"
 
 static thread_func start_process NO_RETURN;
@@ -36,8 +37,7 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
-  child_info = palloc_get_page(PAL_USER);
-  //printf("child info: %x\n", child_info);
+  child_info = palloc_get_page(0);
   if (child_info == NULL){
     return TID_ERROR;
   }
@@ -83,7 +83,7 @@ start_process (void *f_name)
   int size = strlen(file_name) + 1;
   int argc=0; // It counts number of parsed argument
   char **argv; // It holds parsed argument
-  argv = palloc_get_page (PAL_USER);
+  argv = palloc_get_page (0);
   if (argv == NULL){
     *(thread_current()->process_load) = false;
     palloc_free_page (file_name);
@@ -226,7 +226,7 @@ process_exit (void)
          that's been freed (and cleared). */
       curr->pagedir = NULL;
       pagedir_activate (NULL);
-      pagedir_destroy (pd);
+      pagedir_destroy (pd); // TODO: frame table free
     }
 }
 
@@ -314,9 +314,6 @@ static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
-static bool load_segment_modified (struct file *file, off_t ofs, uint8_t *upage,
-                          uint32_t read_bytes, uint32_t zero_bytes,
-                          bool writable);
 
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
@@ -337,6 +334,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
+
+  /* Allocate supplemental page table */
+  page_table_create (&t->page_table);
+  lock_init(&t->page_lock);
 
   /* Open executable file. */
   file = filesys_open (file_name);
@@ -408,7 +409,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
                   read_bytes = 0;
                   zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
                 }
-              if (!load_segment_modified (file, file_page, (void *) mem_page,
+              if (!load_segment (file, file_page, (void *) mem_page,
                                  read_bytes, zero_bytes, writable))
                 goto done;
             }
@@ -504,8 +505,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
-  //printf("load segment from %x, size %x\n", upage, zero_bytes+read_bytes);
-
   file_seek (file, ofs);
   while (read_bytes > 0 || zero_bytes > 0) 
     {
@@ -515,8 +514,11 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
+
+      /*---------------------------------- VM START
+
       /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page_with_frame (PAL_USER, upage, writable);
+      uint8_t *kpage = frame_alloc (PAL_USER, upage, writable);
 
       /* Choose a page to evict when no frames are free (by eviction policy) */
       if (kpage == NULL)
@@ -527,7 +529,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
-          palloc_free_page_with_frame (kpage);
+          frame_free (kpage);
           return false; 
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
@@ -535,44 +537,16 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Add the page to the process's address space. */
       if (!install_page (upage, kpage, writable)) 
         {
-          palloc_free_page_with_frame (kpage);
+          frame_free (kpage);
           return false; 
         }
 
-      /* Advance. */
-      read_bytes -= page_read_bytes;
-      zero_bytes -= page_zero_bytes;
-      upage += PGSIZE;
-    }
-  return true;
-}
-
-static bool
-load_segment_modified (struct file *file, off_t ofs, uint8_t *upage,
-              uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
-{
-  ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
-  ASSERT (pg_ofs (upage) == 0);
-  ASSERT (ofs % PGSIZE == 0);
-
-  //printf("load segment from %x, size %x\n", upage, zero_bytes+read_bytes);
-
-  file_seek (file, ofs);
-  while (read_bytes > 0 || zero_bytes > 0) 
-    {
-      /* Do calculate how to fill this page.
-         We will read PAGE_READ_BYTES bytes from FILE
-         and zero the final PAGE_ZERO_BYTES bytes. */
-      size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
-      size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
-      page_set_file(file, upage, ofs, page_read_bytes, page_zero_bytes, writable);
+      /*---------------------------------- VM END
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
-      ofs += PGSIZE;
     }
   return true;
 }
@@ -585,14 +559,14 @@ setup_stack (void **esp)
   uint8_t *kpage;
   bool success = false;
 
-  kpage = palloc_get_page_with_frame (PAL_USER | PAL_ZERO, ((uint8_t *) PHYS_BASE) - PGSIZE, true);
+  kpage = frame_alloc (PAL_USER | PAL_ZERO, ((uint8_t *) PHYS_BASE) - PGSIZE, true);
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
         *esp = PHYS_BASE;
       else
-        palloc_free_page_with_frame (kpage);
+        frame_free (kpage);
     }
   return success;
 }
@@ -607,7 +581,7 @@ setup_stack (void **esp)
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails. */
 static bool
-install_page (void *upage, void *kpage, bool writable)
+install_page (void *upage, void *kpage, bool writable) // -> 함수 없어도됨
 {
   struct thread *t = thread_current ();
 
