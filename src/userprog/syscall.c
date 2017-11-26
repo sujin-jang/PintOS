@@ -517,6 +517,9 @@ syscall_tell (int fd)
 static mapid_t
 syscall_mmap (int fd, void *addr)
 {
+  if ((addr == NULL) || ((uint8_t)addr % PGSIZE != 0))
+    return -1;
+
   struct file_descriptor *desc = fd_to_file_descriptor (fd);
   ASSERT (desc != NULL);
 
