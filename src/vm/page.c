@@ -3,7 +3,11 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/palloc.h"
+#include "filesys/file.h"
 #include <list.h>
+
+/* Mmap table */
+struct list mmap_table;
 
 static bool install_page (void *upage, void *kpage, bool writable);
 
@@ -138,11 +142,84 @@ install_page (void *upage, void *kpage, bool writable)
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
 
+int
+mmap_load (struct file *file, void *addr)
+{
+  // if addr is not page-aligned or if the range of pages mapped overlaps any existing set of mapped pages,
+  // including the stack or pages mapped at executable load time.
+  // It must also fail if addr is 0, because some Pintos code assumes virtual page 0 is not mapped
+
+  uint8_t *upage = pg_round_down (addr);
+  file_seek (file, 0);
+  off_t read_bytes = file_length (file); 
+
+  bool writable = true; // TODO: 이거 file의 writable 값을 가져와야되는데 함수가 없다 ㅠㅠ 만들까요
+
+  int fail = -1;
+
+  while (read_bytes > 0) 
+    {
+      /* Do calculate how to fill this page.
+         We will read PAGE_READ_BYTES bytes from FILE
+         and zero the final PAGE_ZERO_BYTES bytes. */
+      size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+      size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+      /* Get a page of memory. */
+      uint8_t *kpage = frame_alloc (PAL_USER, upage, writable);
+
+      /* Choose a page to evict when no frames are free (by eviction policy) */
+      if (kpage == NULL)
+      {
+        return fail;
+      }
+
+      /* Load this page. */
+      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+        {
+          frame_free (kpage);
+          return fail; 
+        }
+
+      memset (kpage + page_read_bytes, 0, page_zero_bytes);
+
+      /* Add the page to the process's address space. */
+      if (!install_page (upage, kpage, writable)) 
+        {
+          frame_free (kpage);
+          return fail;
+        }
+
+      /* Advance. */
+      read_bytes -= page_read_bytes;
+      upage += PGSIZE;
+    }
 
 
+  return 0;
+}
 
+/*
+static int
+mmap_insert (struct file* file)
+{
+  struct thread *curr = thread_current ();
+  struct mmap_elem *mmap = malloc(sizeof (*desc));
 
+  curr->mmap_id++;
 
+  desc->id = curr->mmap_id;
+  list_push_back (&curr->mmap_list, &desc->elem);
+
+  return curr->mmap;
+}
+
+struct mmap_
+{
+  int id;
+  struct list_elem elem;
+};
+*/
 
 
 

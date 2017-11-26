@@ -19,10 +19,10 @@ void
 frame_init (void)
 {
   list_init (&frame_table);
-    lock_init (&frame_lock);
+  lock_init (&frame_lock);
 
-    lock_init (&evict_lock);
-    return;
+  lock_init (&evict_lock);
+  return;
 }
 
 /* Frame allcoate */

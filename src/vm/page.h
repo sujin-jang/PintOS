@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <hash.h>
 #include "threads/thread.h"
+#include "userprog/syscall.h"
 
 enum page_status
 {
@@ -34,5 +35,7 @@ bool page_stack_growth (void *upage);
 
 void page_table_create (struct hash *page_table);
 void page_table_destroy (struct hash *page_table);
+
+int mmap_load (struct file *file, void *addr);
 
 #endif

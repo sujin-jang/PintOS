@@ -20,6 +20,7 @@
 #include <stdlib.h>
 
 #define EXIT_STATUS_1 -1
+typedef int mapid_t;
  
 static void syscall_handler (struct intr_frame *);
 //static void syscall_exit (int status);
@@ -33,6 +34,9 @@ static bool syscall_remove (const char *file);
 static bool syscall_seem (const char *file);
 static void syscall_seek (int fd, unsigned position);
 static unsigned syscall_tell (int fd);
+
+static mapid_t syscall_mmap (int fd, void *addr);
+static void syscall_munmap (mapid_t mapid);
 
 static int get_user (const uint8_t *uaddr);
 
@@ -144,9 +148,12 @@ syscall_handler (struct intr_frame *f UNUSED)
  */
     case SYS_MMAP:
       // Not implemented yet
+      // is_valid_page(f, *(void **)arg2, false); /* TODO: is_valid_buffer로 file length만큼 validity check */
+      f->eax = (uint32_t) syscall_mmap ((int)*arg1, *(void **)arg2);
       break;
     case SYS_MUNMAP:
       // Not implemented yet
+      syscall_munmap ((mapid_t)*arg1);
       break;
     case SYS_CHDIR:
       // Not implemented yet
@@ -505,4 +512,23 @@ syscall_tell (int fd)
   lock_release(&lock_file);
 
   return result;
+}
+
+static mapid_t
+syscall_mmap (int fd, void *addr)
+{
+  struct file_descriptor *desc = fd_to_file_descriptor (fd);
+  ASSERT (desc != NULL);
+
+  mapid_t id = mmap_load (desc->file, addr);
+
+  //printf("mapid: %d", id);
+
+  return id;
+}
+
+static void
+syscall_munmap (mapid_t mapid)
+{
+  return;
 }
