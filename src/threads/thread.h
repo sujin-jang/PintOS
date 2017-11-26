@@ -112,12 +112,17 @@ struct thread
     struct list fd_list;
     struct file* executable;
 
-    struct hash page_table;
-    struct lock page_lock;
+    int mmap_id;
+    struct list mmap_table;
 #endif
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+
+#ifdef USERPROG
+    struct hash page_table;
+    struct lock page_lock;
+#endif
   };
 
 /* If false (default), use round-robin scheduler.

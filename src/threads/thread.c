@@ -497,7 +497,8 @@ init_thread (struct thread *t, const char *name, int priority)
 #ifdef USERPROG
   t->fd = 1; // start from 2 (0, 1: STDIN, STDOUT)
   list_init (&t->fd_list);
-  list_init (&t->child);
+  t->mmap_id = 0;
+  list_init (&t->mmap_table);
 #endif
 
   t->magic = THREAD_MAGIC;

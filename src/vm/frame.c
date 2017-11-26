@@ -101,7 +101,6 @@ frame_free (void *kpage)
   1. find(kapge) != NULL 이면: palloc_free_page
   2. struct page의 status = not frame으로 변경..?
   3. frame table에서 pull
-
   4. find(kpage) == NULL 이면: nothing
   */
 
@@ -155,4 +154,3 @@ frame_evict (void) // TODO: evict lock
 
     return NULL;
 }
-

@@ -530,5 +530,6 @@ syscall_mmap (int fd, void *addr)
 static void
 syscall_munmap (mapid_t mapid)
 {
+  mmap_unload (mapid);
   return;
 }

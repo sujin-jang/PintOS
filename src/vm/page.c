@@ -6,10 +6,18 @@
 #include "filesys/file.h"
 #include <list.h>
 
-/* Mmap table */
-struct list mmap_table;
+struct mmap_mapping
+{
+  int id;
+  struct file *file;
+  void *addr;
+  struct list_elem elem;
+};
 
 static bool install_page (void *upage, void *kpage, bool writable);
+
+static int mmap_insert (struct file* file, void *addr);
+static struct mmap_mapping * mmap_find (int mapid);
 
 struct page *
 page_insert (void *upage, bool writable, enum page_status status)
@@ -195,31 +203,91 @@ mmap_load (struct file *file, void *addr)
       upage += PGSIZE;
     }
 
-
-  return 0;
+  return mmap_insert(file, addr);
 }
 
-/*
+
 static int
-mmap_insert (struct file* file)
+mmap_insert (struct file* file, void *addr)
 {
   struct thread *curr = thread_current ();
-  struct mmap_elem *mmap = malloc(sizeof (*desc));
+  struct mmap_mapping *mmap = malloc(sizeof (*mmap));
 
+  //lock_acquire(&mmap_lock);
   curr->mmap_id++;
+  mmap->id = curr->mmap_id;
+  mmap->file = file;
+  mmap->addr = addr;
 
-  desc->id = curr->mmap_id;
-  list_push_back (&curr->mmap_list, &desc->elem);
+  list_push_back (&curr->mmap_table, &mmap->elem);
+  //lock_release(&mmap_lock);
 
-  return curr->mmap;
+  return curr->mmap_id;
 }
 
-struct mmap_
+static struct mmap_mapping *
+mmap_find (int mapid)
 {
-  int id;
-  struct list_elem elem;
-};
-*/
+  struct thread *curr = thread_current ();
+  struct list_elem *iter;
+  struct mmap_mapping *mmap;
+
+  //lock_acquire(&mmap_lock);
+  for (iter = list_begin (&curr->mmap_table); iter != list_end (&curr->mmap_table); iter = list_next (iter))
+  {
+    mmap = list_entry(iter, struct mmap_mapping, elem);
+    if (mmap->id == mapid)
+    {
+      //lock_release(&mmap_lock);
+      return mmap;
+    }
+  }
+  //lock_release(&mmap_lock);
+  return NULL;
+}
+
+void
+mmap_unload (int mapid)
+{
+  // TODO: if dirty bit = ON 이면 write 해야하지만 귀찮으니까 그냥 write 한다 ^^
+
+  // 1. file write
+  struct mmap_mapping * mmap = mmap_find (mapid);
+  ASSERT(mmap != NULL);
+
+  struct thread *curr = thread_current();
+  uint8_t *kpage;
+  uint8_t *upage = pg_round_down (mmap->addr);
+  struct file *file = mmap->file;
+
+  file_seek (file, 0);
+
+  //lock_acquire(&lock_file);
+  off_t read_bytes = file_length (file);
+  //lock_release(&lock_file);
+
+  off_t ofs = 0; 
+
+  while (read_bytes > 0) 
+    {
+      size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+      size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+      kpage = pagedir_get_page (curr->pagedir, upage);
+      //lock_acquire(&lock_file);
+      ASSERT (file_write_at (file, kpage, page_read_bytes, ofs) == (int) page_read_bytes);
+      //lock_release(&lock_file);
+
+      pagedir_clear_page(curr->pagedir, upage); // TODO: page list에서 제거는?
+      frame_free (kpage);
+
+      read_bytes -= page_read_bytes;
+      upage += PGSIZE;
+      ofs += PGSIZE;
+    }
+
+  // 2. page / frame dealloc
+}
 
 
 

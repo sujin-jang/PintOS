@@ -37,5 +37,6 @@ void page_table_create (struct hash *page_table);
 void page_table_destroy (struct hash *page_table);
 
 int mmap_load (struct file *file, void *addr);
+void mmap_unload (int mapid);
 
 #endif
