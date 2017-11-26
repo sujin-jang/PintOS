@@ -47,14 +47,23 @@ static void is_valid_page (struct intr_frame *f UNUSED, void *uaddr, bool write)
 static int file_add_fdlist (struct file* file);
 static void file_remove_fdlist (int fd);
 static struct file_descriptor * fd_to_file_descriptor (int fd);
+static void process_remove_mmaptable (struct thread* t);
+
+static bool install_page (void *upage, void *kpage, bool writable);
+static int mmap_load (struct file *file, void *addr);
+static int mmap_insert (struct file* file, void *addr);
+static struct mmap_mapping * mmap_find (int mapid);
+static void mmap_unload (int mapid);
 
 struct lock lock_file;
+struct lock mmap_lock;
 
 void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
   lock_init (&lock_file);
+  lock_init (&mmap_lock);
 }
 
 static void
@@ -347,6 +356,27 @@ process_remove_fdlist (struct thread* t)
   }
 }
 
+static void
+process_remove_mmaptable (struct thread* t)
+{
+  struct list_elem *iter, *iter_2;
+  struct mmap_mapping *mmap;
+
+  if(list_empty(&t->mmap_table))
+  {
+    return;
+  }
+
+  while((iter = list_begin (&t->mmap_table)) != list_end (&t->mmap_table))
+  {
+    iter_2 = list_next (iter);
+    mmap = list_entry(iter, struct mmap_mapping, elem);
+
+    mmap_unload (mmap->id);
+    iter = iter_2;
+  }
+}
+
 /************************************************************
 *              system call helper function.                 *
 *************************************************************/
@@ -367,6 +397,7 @@ syscall_exit (int status)
     if (child_process->tid == curr->tid){
       child_process->exit_stat = status;
 
+      process_remove_mmaptable(curr);
       process_remove_fdlist(curr);
 
       char* save_ptr;
@@ -394,7 +425,10 @@ syscall_open (char *file)
   struct file* opened_file = filesys_open (file);
 
   if (opened_file == NULL)
+  {
+    lock_release(&lock_file);
     return -1;
+  }
 
   int result = file_add_fdlist(opened_file);
   lock_release(&lock_file);
@@ -537,4 +571,160 @@ syscall_munmap (mapid_t mapid)
 {
   mmap_unload (mapid);
   return;
+}
+
+// ----------
+
+static bool
+install_page (void *upage, void *kpage, bool writable)
+{
+  struct thread *t = thread_current ();
+
+  /* Verify that there's not already a page at that virtual
+     address, then map our page there. */
+  return (pagedir_get_page (t->pagedir, upage) == NULL
+          && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+static int
+mmap_load (struct file *file, void *addr)
+{
+  // if addr is not page-aligned or if the range of pages mapped overlaps any existing set of mapped pages,
+  // including the stack or pages mapped at executable load time.
+  // It must also fail if addr is 0, because some Pintos code assumes virtual page 0 is not mapped
+
+  uint8_t *upage = pg_round_down (addr);
+  file_seek (file, 0);
+  off_t read_bytes = file_length (file); 
+
+  bool writable = true; // TODO: 이거 file의 writable 값을 가져와야되는데 함수가 없다 ㅠㅠ 만들까요
+
+  int fail = -1;
+
+  while (read_bytes > 0) 
+    {
+      /* Do calculate how to fill this page.
+         We will read PAGE_READ_BYTES bytes from FILE
+         and zero the final PAGE_ZERO_BYTES bytes. */
+      size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+      size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+      /* Get a page of memory. */
+      uint8_t *kpage = frame_alloc (PAL_USER, upage, writable);
+
+      /* Choose a page to evict when no frames are free (by eviction policy) */
+      if (kpage == NULL)
+      {
+        return fail;
+      }
+
+      /* Load this page. */
+      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+        {
+          frame_free (kpage);
+          return fail; 
+        }
+
+      memset (kpage + page_read_bytes, 0, page_zero_bytes);
+
+      /* Add the page to the process's address space. */
+      if (!install_page (upage, kpage, writable)) 
+        {
+          frame_free (kpage);
+          return fail;
+        }
+
+      /* Advance. */
+      read_bytes -= page_read_bytes;
+      upage += PGSIZE;
+    }
+
+  file_seek (file, 0);
+  return mmap_insert(file, addr);
+}
+
+
+static int
+mmap_insert (struct file* file, void *addr)
+{
+  struct thread *curr = thread_current ();
+  struct mmap_mapping *mmap = malloc(sizeof (*mmap));
+
+  lock_acquire(&mmap_lock);
+  curr->mmap_id++;
+  mmap->id = curr->mmap_id;
+  mmap->file = file;
+  mmap->addr = addr;
+
+  list_push_back (&curr->mmap_table, &mmap->elem);
+  lock_release(&mmap_lock);
+
+  return curr->mmap_id;
+}
+
+static struct mmap_mapping *
+mmap_find (int mapid)
+{
+  struct thread *curr = thread_current ();
+  struct list_elem *iter;
+  struct mmap_mapping *mmap;
+
+  lock_acquire(&mmap_lock);
+  for (iter = list_begin (&curr->mmap_table); iter != list_end (&curr->mmap_table); iter = list_next (iter))
+  {
+    mmap = list_entry(iter, struct mmap_mapping, elem);
+    if (mmap->id == mapid)
+    {
+      lock_release(&mmap_lock);
+      return mmap;
+    }
+  }
+  lock_release(&mmap_lock);
+  return NULL;
+}
+
+static void
+mmap_unload (int mapid)
+{
+  struct mmap_mapping * mmap = mmap_find (mapid);
+  ASSERT(mmap != NULL);
+
+  struct thread *curr = thread_current();
+  uint8_t *kpage;
+  uint8_t *upage = pg_round_down (mmap->addr);
+  struct file *file = mmap->file;
+
+  file_seek (file, 0);
+
+  lock_acquire(&lock_file);
+  off_t read_bytes = file_length (file);
+  lock_release(&lock_file);
+
+  off_t ofs = 0; 
+
+  while (read_bytes > 0) 
+    {
+      size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+      size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+      kpage = pagedir_get_page (curr->pagedir, upage);
+
+      lock_acquire(&lock_file);
+      if (pagedir_is_dirty (curr->pagedir, upage))
+      {
+        ASSERT (file_write_at (file, kpage, page_read_bytes, ofs) == (int) page_read_bytes);
+      }
+      lock_release(&lock_file);
+
+      pagedir_clear_page(curr->pagedir, upage); // TODO: page list에서 제거는?
+      frame_free (kpage);
+
+      read_bytes -= page_read_bytes;
+      upage += PGSIZE;
+      ofs += PGSIZE;
+    }
+
+  list_remove (&mmap->elem);
+  free (mmap);
+  // 2. page / frame dealloc
 }

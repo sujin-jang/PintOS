@@ -6,18 +6,12 @@
 #include "filesys/file.h"
 #include <list.h>
 
-struct mmap_mapping
-{
-  int id;
-  struct file *file;
-  void *addr;
-  struct list_elem elem;
-};
-
 static bool install_page (void *upage, void *kpage, bool writable);
 
+/*
 static int mmap_insert (struct file* file, void *addr);
 static struct mmap_mapping * mmap_find (int mapid);
+*/
 
 struct page *
 page_insert (void *upage, bool writable, enum page_status status)
@@ -150,6 +144,7 @@ install_page (void *upage, void *kpage, bool writable)
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
 
+/*
 int
 mmap_load (struct file *file, void *addr)
 {
@@ -167,22 +162,16 @@ mmap_load (struct file *file, void *addr)
 
   while (read_bytes > 0) 
     {
-      /* Do calculate how to fill this page.
-         We will read PAGE_READ_BYTES bytes from FILE
-         and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      /* Get a page of memory. */
       uint8_t *kpage = frame_alloc (PAL_USER, upage, writable);
 
-      /* Choose a page to evict when no frames are free (by eviction policy) */
       if (kpage == NULL)
       {
         return fail;
       }
 
-      /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
           frame_free (kpage);
@@ -191,18 +180,16 @@ mmap_load (struct file *file, void *addr)
 
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
 
-      /* Add the page to the process's address space. */
       if (!install_page (upage, kpage, writable)) 
         {
           frame_free (kpage);
           return fail;
         }
 
-      /* Advance. */
       read_bytes -= page_read_bytes;
       upage += PGSIZE;
     }
-    
+
   file_seek (file, 0);
   return mmap_insert(file, addr);
 }
@@ -277,7 +264,9 @@ mmap_unload (int mapid)
       kpage = pagedir_get_page (curr->pagedir, upage);
       //lock_acquire(&lock_file);
       if (pagedir_is_dirty (curr->pagedir, upage))
+      {
         ASSERT (file_write_at (file, kpage, page_read_bytes, ofs) == (int) page_read_bytes);
+      }
       //lock_release(&lock_file);
 
       pagedir_clear_page(curr->pagedir, upage); // TODO: page list에서 제거는?
@@ -288,9 +277,11 @@ mmap_unload (int mapid)
       ofs += PGSIZE;
     }
 
+  list_remove (&mmap->elem);
+  free (mmap);
   // 2. page / frame dealloc
 }
-
+*/
 
 
 

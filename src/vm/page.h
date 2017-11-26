@@ -6,6 +6,8 @@
 #include "threads/thread.h"
 #include "userprog/syscall.h"
 
+void page_init (void);
+
 enum page_status
 {
   PAGE_FRAME,
@@ -26,6 +28,14 @@ struct page
     struct hash_elem elem;
 };
 
+struct mmap_mapping
+{
+  int id;
+  struct file *file;
+  void *addr;
+  struct list_elem elem;
+};
+
 struct page * page_insert (void *upage, bool writable, enum page_status status);
 void page_remove (void *upage);
 bool page_load (struct page *page);
@@ -36,7 +46,8 @@ bool page_stack_growth (void *upage);
 void page_table_create (struct hash *page_table);
 void page_table_destroy (struct hash *page_table);
 
+/*
 int mmap_load (struct file *file, void *addr);
 void mmap_unload (int mapid);
-
+*/
 #endif
