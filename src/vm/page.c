@@ -275,7 +275,8 @@ mmap_unload (int mapid)
 
       kpage = pagedir_get_page (curr->pagedir, upage);
       //lock_acquire(&lock_file);
-      ASSERT (file_write_at (file, kpage, page_read_bytes, ofs) == (int) page_read_bytes);
+      if (pagedir_is_dirty (curr->pagedir, upage))
+        ASSERT (file_write_at (file, kpage, page_read_bytes, ofs) == (int) page_read_bytes);
       //lock_release(&lock_file);
 
       pagedir_clear_page(curr->pagedir, upage); // TODO: page list에서 제거는?

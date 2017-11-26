@@ -521,7 +521,8 @@ syscall_mmap (int fd, void *addr)
     return -1;
 
   struct file_descriptor *desc = fd_to_file_descriptor (fd);
-  ASSERT (desc != NULL);
+  if (desc == NULL)
+    return -1;
 
   mapid_t id = mmap_load (desc->file, addr);
 
