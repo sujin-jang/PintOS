@@ -202,7 +202,8 @@ mmap_load (struct file *file, void *addr)
       read_bytes -= page_read_bytes;
       upage += PGSIZE;
     }
-
+    
+  file_seek (file, 0);
   return mmap_insert(file, addr);
 }
 

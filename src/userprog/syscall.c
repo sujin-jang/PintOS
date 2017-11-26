@@ -108,7 +108,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = (uint32_t) syscall_filesize((int)*arg1);
       break;
     case SYS_READ: //8
-
+      //printf("syscall read\n");
       is_valid_buffer(f, *(void **)arg2, (unsigned)*arg3, true);
       
       if((int)*arg1 == 0)
@@ -120,12 +120,11 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = (uint32_t) syscall_read((int)*arg1, *(void **)arg2, (unsigned)*arg3);
       break;
     case SYS_WRITE: //9
-
+      //printf("syscall write\n");
       is_valid_buffer(f, *(void **)arg2, (unsigned)*arg3, false);
-      
       if((int)*arg1 == 0)
       {
-        //printf("syscall exit here2\n");
+        //printf("syscall write exit 1\n");
         syscall_exit(EXIT_STATUS_1); //STDIN은 exit/ todo: valid ptr 안에 집어넣기
       }
 
@@ -446,7 +445,7 @@ syscall_filesize (int fd)
 static int
 syscall_write (int fd, void *buffer, unsigned size)
 {
-
+  //printf("input size: %d, fd: %d\n", size, fd);
   if (fd == 1) /* STDOUT */
   {
     putbuf (buffer, size);
@@ -466,6 +465,8 @@ syscall_write (int fd, void *buffer, unsigned size)
   int result = file_write (desc->file, buffer, size);
 
   lock_release(&lock_file);
+
+  //printf("return size: %d\n", result);
   return result;
 }
 
@@ -526,7 +527,7 @@ syscall_mmap (int fd, void *addr)
 
   mapid_t id = mmap_load (desc->file, addr);
 
-  //printf("mapid: %d", id);
+  // printf("mapid: %d\n", id);
 
   return id;
 }
