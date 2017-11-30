@@ -559,7 +559,11 @@ syscall_mmap (int fd, void *addr)
   if (desc == NULL)
     return -1;
 
-  mapid_t id = mmap_load (desc->file, addr);
+  lock_acquire(&lock_file);
+  struct file *f = file_reopen(desc->file);
+  lock_release(&lock_file);
+
+  mapid_t id = mmap_load (f, addr);
 
   // printf("mapid: %d\n", id);
 
@@ -724,7 +728,10 @@ mmap_unload (int mapid)
       ofs += PGSIZE;
     }
 
+  lock_acquire(&lock_file);
+  file_close(mmap->file);
+  lock_release(&lock_file);
+
   list_remove (&mmap->elem);
   free (mmap);
-  // 2. page / frame dealloc
 }

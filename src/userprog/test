@@ -1,0 +1,1 @@
+cd build/;pintos -k -v -T 60 --qemu  --fs-disk=2 -p tests/userprog/args-none -a args-none -- -q -f run 'args-none'; cd ..
