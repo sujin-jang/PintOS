@@ -3,4 +3,5 @@ filesys/inode.o: ../../filesys/inode.c ../../filesys/inode.h \
   ../../devices/disk.h ../../lib/inttypes.h ../../lib/kernel/list.h \
   ../../lib/stddef.h ../../lib/debug.h ../../lib/round.h \
   ../../lib/string.h ../../filesys/filesys.h ../../filesys/free-map.h \
+  ../../filesys/cache.h ../../lib/kernel/hash.h ../../lib/kernel/list.h \
   ../../threads/malloc.h
