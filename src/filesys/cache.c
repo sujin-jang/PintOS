@@ -1,179 +1,200 @@
-#include <debug.h>
-#include <string.h>
 #include "filesys/cache.h"
 #include "filesys/filesys.h"
 #include "threads/synch.h"
+#include "userprog/process.h"
 
-#define BUFFER_CACHE_SIZE 64
+// struct hash buffer_cache;	/* Buffer Cache */
 
-struct buffer_cache_entry_t {
-  bool occupied;  // true only if this entry is valid cache entry
+#define CACHE_SIZE_LIMIT 64
 
-  disk_sector_t disk_sector;
-  uint8_t buffer[DISK_SECTOR_SIZE];
+struct list buffer_cache; /* Buffer Cache */
+struct lock cache_lock;   /* Lock for Buffer Cache */
+struct lock disk_lock;    /* Lock for File Disk */
 
-  bool dirty;     // dirty bit
-  bool access;    // reference bit, for clock algorithm
-};
+struct lock insert_lock;
 
-/* Buffer cache entries. */
-static struct buffer_cache_entry_t cache[BUFFER_CACHE_SIZE];
+static struct cache_entry * cache_insert (disk_sector_t sec_no);
+static bool cache_evict (void);
 
-/* A global lock for synchronizing buffer cache operations. */
-static struct lock buffer_cache_lock;
-
+/* Initializes the buffer cache (called in threads/init.c) */
 void
-buffer_cache_init (void)
+cache_init (void)
 {
-  lock_init (&buffer_cache_lock);
+  list_init (&buffer_cache);
+  lock_init (&cache_lock);
+  lock_init (&disk_lock);
+  lock_init (&insert_lock);
 
-  // initialize entries
-  size_t i;
-  for (i = 0; i < BUFFER_CACHE_SIZE; ++ i)
-  {
-    cache[i].occupied = false;
-  }
+  //hash_init (&buffer_cache, cache_hash, cache_less, NULL);
+  return;
 }
 
-/**
- * An internal method for flushing back the cache entry into disk.
- * Must be called with the lock held.
- */
+static struct cache_entry *
+cache_insert (disk_sector_t sec_no)
+{
+  lock_acquire (&insert_lock);
+
+  if (list_size (&buffer_cache) >= CACHE_SIZE_LIMIT)
+  {
+    ASSERT(cache_evict());
+  }
+
+	struct cache_entry *c = malloc(sizeof *c);
+
+  c -> sec_no = sec_no;
+  c -> dirty = false;
+  c -> access = false;
+
+  lock_acquire (&disk_lock);
+  disk_read (filesys_disk, sec_no, &c->block);
+  lock_release (&disk_lock);
+
+	lock_acquire(&cache_lock);
+	list_push_back (&buffer_cache, &c->elem);
+  lock_release(&cache_lock);
+
+  lock_release (&insert_lock);
+
+  return c;
+}
+
+static bool
+cache_evict (void)
+{
+  ASSERT(!list_empty(&buffer_cache));
+
+  struct cache_entry *c = list_entry (list_begin (&buffer_cache), struct cache_entry, elem);
+  struct cache_entry *c_next;
+
+  /* cache replacement policy: second chance algorithm */
+  while (&c_next->elem != list_end(&buffer_cache))
+  {
+    c_next = list_entry (list_next (&c->elem), struct cache_entry, elem);
+    
+    if (c->access == true)
+    {
+      c->access = false;
+      list_remove (&c->elem);
+      list_push_back (&buffer_cache, &c->elem);
+    } else {
+      break;
+    }
+  }
+
+  if (c->dirty)
+  {
+    /* write back */
+    lock_acquire (&disk_lock);
+    disk_write (filesys_disk, c->sec_no, &c->block);
+    lock_release (&disk_lock);
+  }
+
+  list_remove (&c->elem);
+  free(c);
+
+  return true;
+}
+
+struct cache_entry *
+cache_find (disk_sector_t sec_no)
+{
+  lock_acquire(&cache_lock);
+
+  struct list_elem *e;
+  struct cache_entry *c;
+
+  for (e = list_begin (&buffer_cache); e != list_end (&buffer_cache); e = list_next (e))
+  {
+    c = list_entry (e, struct cache_entry, elem);
+    if (c->sec_no == sec_no)
+    {
+      lock_release(&cache_lock);
+      return c;
+    }
+  }
+
+  lock_release(&cache_lock);
+
+  c = cache_insert (sec_no);
+  ASSERT(c != NULL);
+
+  return c;
+}
+
+bool
+cache_write (disk_sector_t sec_no, void* buffer, int ofs, int size)
+{
+  struct cache_entry *c = cache_find (sec_no);
+  ASSERT(c!=NULL);
+
+  memcpy ((uint8_t *) &c->block + ofs, buffer, size);
+  c->dirty = true;
+  c->access = true;
+  return true;
+}
+
+bool
+cache_read (disk_sector_t sec_no, void* buffer, int ofs, int size)
+{
+  struct cache_entry *c = cache_find (sec_no);
+  ASSERT(c!=NULL);
+
+  memcpy (buffer, (uint8_t *) &c->block + ofs, size);
+  c->access = true;
+  return true;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* Hash table help funtions */
+
+/*
+
+static void cache_destroy (struct hash *hash);
+static void cache_create (struct hash *hash);
+static unsigned cache_hash (const struct hash_elem *p_, void *aux UNUSED);
+static bool cache_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
+
+
+static unsigned
+cache_hash (const struct hash_elem *c_, void *aux UNUSED)
+{
+  const struct cache_entry *c = hash_entry (c_, struct cache_entry, elem);
+  return hash_bytes (&c->sec_no, sizeof c->sec_no);
+}
+
+static bool
+cache_less (const struct hash_elem *a_, const struct hash_elem *b_,
+                void *aux UNUSED)
+{
+  const struct cache_entry *a = hash_entry (a_, struct cache_entry, elem);
+  const struct cache_entry *b = hash_entry (b_, struct cache_entry, elem);
+  return a->sec_no < b->sec_no;
+}
+
 static void
-buffer_cache_flush (struct buffer_cache_entry_t *entry)
+cache_create (struct hash *hash)
 {
-  ASSERT (lock_held_by_current_thread(&buffer_cache_lock));
-  ASSERT (entry != NULL && entry->occupied == true);
-
-  if (entry->dirty) {
-    disk_write (filesys_disk, entry->disk_sector, entry->buffer);
-    entry->dirty = false;
-  }
+  hash_init (hash, cache_hash, cache_less, NULL);
 }
 
-void
-buffer_cache_close (void)
+static void
+cache_destroy (struct hash *hash)
 {
-  // flush buffer cache entries
-  lock_acquire (&buffer_cache_lock);
-
-  size_t i;
-  for (i = 0; i < BUFFER_CACHE_SIZE; ++ i)
-  {
-    if (cache[i].occupied == false) continue;
-    buffer_cache_flush( &(cache[i]) );
-  }
-
-  lock_release (&buffer_cache_lock);
+  // hash_destroy (struct hash *hash, hash action func *action);
+  return;
 }
-
-
-/**
- * Lookup the cache entry, and returns the pointer of buffer_cache_entry_t,
- * or NULL in case of cache miss. (simply traverse the cache entries)
- */
-static struct buffer_cache_entry_t*
-buffer_cache_lookup (disk_sector_t sector)
-{
-  size_t i;
-  for (i = 0; i < BUFFER_CACHE_SIZE; ++ i)
-  {
-    if (cache[i].occupied == false) continue;
-    if (cache[i].disk_sector == sector) {
-      // cache hit.
-      return &(cache[i]);
-    }
-  }
-  return NULL; // cache miss
-}
-
-/**
- * Obtain a free cache entry slot.
- * If there is an unoccupied slot already, return it.
- * Otherwise, some entry should be evicted by the clock algorithm.
- */
-static struct buffer_cache_entry_t*
-buffer_cache_evict (void)
-{
-  ASSERT (lock_held_by_current_thread(&buffer_cache_lock));
-
-  // clock algorithm
-  static size_t clock = 0;
-  while (true) {
-    if (cache[clock].occupied == false) {
-      // found an empty slot -- use it
-      return &(cache[clock]);
-    }
-
-    if (cache[clock].access) {
-      // give a second chance
-      cache[clock].access = false;
-    }
-    else break;
-
-    clock ++;
-    clock %= BUFFER_CACHE_SIZE;
-  }
-
-  // evict cache[clock]
-  struct buffer_cache_entry_t *slot = &cache[clock];
-  if (slot->dirty) {
-    // write back into disk
-    buffer_cache_flush (slot);
-  }
-
-  slot->occupied = false;
-  return slot;
-}
-
-
-void
-buffer_cache_read (disk_sector_t sector, void *target)
-{
-  lock_acquire (&buffer_cache_lock);
-
-  struct buffer_cache_entry_t *slot = buffer_cache_lookup (sector);
-  if (slot == NULL) {
-    // cache miss: need eviction.
-    slot = buffer_cache_evict ();
-    ASSERT (slot != NULL && slot->occupied == false);
-
-    // fill in the cache entry.
-    slot->occupied = true;
-    slot->disk_sector = sector;
-    slot->dirty = false;
-    disk_read (filesys_disk, sector, slot->buffer);
-  }
-
-  // copy the buffer data into memory.
-  slot->access = true;
-  memcpy (target, slot->buffer, DISK_SECTOR_SIZE);
-
-  lock_release (&buffer_cache_lock);
-}
-
-void
-buffer_cache_write (disk_sector_t sector, const void *source)
-{
-  lock_acquire (&buffer_cache_lock);
-
-  struct buffer_cache_entry_t *slot = buffer_cache_lookup (sector);
-  if (slot == NULL) {
-    // cache miss: need eviction.
-    slot = buffer_cache_evict ();
-    ASSERT (slot != NULL && slot->occupied == false);
-
-    // fill in the cache entry.
-    slot->occupied = true;
-    slot->disk_sector = sector;
-    slot->dirty = false;
-    disk_read (filesys_disk, sector, slot->buffer);
-  }
-
-  // copy the data form memory into the buffer cache.
-  slot->access = true;
-  slot->dirty = true;
-  memcpy (slot->buffer, source, DISK_SECTOR_SIZE);
-
-  lock_release (&buffer_cache_lock);
-}
+*/
