@@ -203,6 +203,8 @@ process_exit (void)
     palloc_free_page(c);
   }
 
+  if(curr->cwd) dir_close (curr->cwd);
+
   struct file *file = curr->executable;
   if (file != NULL)
   {
@@ -412,6 +414,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
           break;
         }
     }
+
+  t->cwd = dir_open_root();
 
   /* Set up stack. */
   if (!setup_stack (esp))

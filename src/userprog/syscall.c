@@ -13,6 +13,8 @@
 
 #include "filesys/filesys.h"
 #include "filesys/file.h"
+#include "filesys/inode.h"
+#include "filesys/directory.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -31,6 +33,12 @@ static bool syscall_remove (const char *file);
 static bool syscall_seem (const char *file);
 static void syscall_seek (int fd, unsigned position);
 static unsigned syscall_tell (int fd);
+
+static bool syscall_chdir(const char *file);
+static bool syscall_mkdir(const char *file);
+static bool syscall_readdir(int fd, char *file);
+static bool syscall_isdir(int fd);
+static int syscall_inumber(int fd);
 
 static int get_user (const uint8_t *uaddr);
 static void is_valid_ptr (struct intr_frame *f UNUSED, void *uaddr);
@@ -109,8 +117,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       syscall_seek ((int)*arg1, (unsigned)*arg2);
       break;
     case SYS_TELL:
-      f->eax = (uint32_t) syscall_tell (*(char **)arg1);
-      // Not implemented
+      f->eax = (uint32_t) syscall_tell ((int)*arg1);
       break;
     case SYS_CLOSE:
       syscall_close((int)*arg1);
@@ -126,25 +133,30 @@ syscall_handler (struct intr_frame *f UNUSED)
       // Not implemented yet
       break;
     case SYS_CHDIR:
-      // Not implemented yet
+      is_valid_ptr(f, *(void **)arg1);
+      f->eax = (uint32_t) syscall_chdir (*(char **)arg1);
       break;
     case SYS_MKDIR:
-      // Not implemented yet
+      is_valid_ptr(f, *(void **)arg1);
+      f->eax = (uint32_t) syscall_mkdir (*(char **)arg1);
       break;
     case SYS_READDIR: 
       // Not implemented yet
+      is_valid_ptr(f, *(void **)arg2);
+      f->eax = (uint32_t) syscall_readdir ((int)*arg1, *(char **)arg2);
       break;
     case SYS_ISDIR:
       // Not implemented yet
+      f->eax = (uint32_t) syscall_isdir ((int)*arg1);
       break;
     case SYS_INUMBER:
       // Not implemented yet
+      f->eax = (uint32_t) syscall_inumber ((int)*arg1);
       break;
 /* ---------------------------------------------------------------------*/
     default:
       break;
   }
-  //printf("sysnr = %d, f->eax = %d\n",*syscall_nr,f->eax);
 }
 
 static int get_user (const uint8_t *uaddr){
@@ -179,6 +191,7 @@ struct file_descriptor
 {
   int fd;
   struct file* file;
+  struct dir* dir;
   struct list_elem elem;
 };
 
@@ -287,7 +300,7 @@ syscall_exit (int status)
 static bool
 syscall_create (char *file, off_t initial_size)
 {
-  return filesys_create (file, initial_size);
+  return filesys_create (file, initial_size, false);
 }
 
 static int
@@ -348,7 +361,6 @@ syscall_filesize (int fd)
 static int
 syscall_write (int fd, void *buffer, unsigned size)
 {
-
   if (fd == 1) /* STDOUT */
   {
     putbuf (buffer, size);
@@ -360,6 +372,13 @@ syscall_write (int fd, void *buffer, unsigned size)
   struct file_descriptor *desc = fd_to_file_descriptor(fd);
 
   if (desc == NULL)
+  {
+    lock_release(&lock_file);
+    return -1;
+  }
+
+  bool is_dir = inode_is_directory (file_get_inode(desc->file));
+  if (is_dir)
   {
     lock_release(&lock_file);
     return -1;
@@ -414,4 +433,86 @@ syscall_tell (int fd)
   lock_release(&lock_file);
 
   return result;
+}
+
+/*----------- FILE SYSTEM -------------------*/
+
+static bool
+syscall_chdir(const char *file)
+{
+  bool return_code;
+
+  lock_acquire (&lock_file);
+  return_code = filesys_chdir(file);
+  lock_release (&lock_file);
+
+  return return_code;
+}
+
+static bool
+syscall_mkdir(const char *file)
+{
+  bool return_code;
+
+  lock_acquire (&lock_file);
+  return_code = filesys_create(file, 0, true);
+  lock_release (&lock_file);
+
+  return return_code;
+}
+
+static bool
+syscall_readdir(int fd, char *file)
+{
+  lock_acquire (&lock_file);
+
+  struct file_descriptor *desc = fd_to_file_descriptor(fd);
+  if (desc== NULL)
+  {
+    lock_release (&lock_file);
+    return false;
+  }
+
+  struct inode *inode = file_get_inode(desc->file);
+  if(inode == NULL)
+  {
+    lock_release (&lock_file);
+    return false;
+  }
+
+  if(!inode_is_directory(inode))
+  {
+    lock_release (&lock_file);
+    return false;
+  }
+
+  ASSERT (desc->dir != NULL);
+
+  bool result = dir_readdir (desc->dir, file);
+  lock_release (&lock_file);
+  return result;
+}
+
+static bool
+syscall_isdir(int fd)
+{
+  lock_acquire (&lock_file);
+
+  struct file_descriptor *desc = fd_to_file_descriptor(fd);
+  bool ret = inode_is_directory (file_get_inode(desc->file));
+
+  lock_release (&lock_file);
+  return ret;
+}
+
+static int
+syscall_inumber(int fd)
+{
+  lock_acquire (&lock_file);
+
+  struct file_descriptor *desc = fd_to_file_descriptor(fd);
+  int ret = (int) inode_get_inumber (file_get_inode(desc->file));
+
+  lock_release (&lock_file);
+  return ret;
 }
