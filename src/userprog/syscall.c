@@ -109,6 +109,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       syscall_seek ((int)*arg1, (unsigned)*arg2);
       break;
     case SYS_TELL:
+      f->eax = (uint32_t) syscall_tell (*(char **)arg1);
       // Not implemented
       break;
     case SYS_CLOSE:
@@ -143,6 +144,7 @@ syscall_handler (struct intr_frame *f UNUSED)
     default:
       break;
   }
+  //printf("sysnr = %d, f->eax = %d\n",*syscall_nr,f->eax);
 }
 
 static int get_user (const uint8_t *uaddr){
